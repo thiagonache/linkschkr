@@ -26,11 +26,11 @@ func TestCrawler(t *testing.T) {
 	<body>
 		Hi folks,
 
-		We do love <a href="https://golang.org">Go</a>. Go is awesome!
+		See docs <a href="/docs">Go docs</a>. Go is awesome!
 		ajkwerjakwerjkaewrhjakwehrjkawe
 		aelwrkhakelrhalkewrhkleawlhrwaklerhalkewrhalewrk
 
-		Visit <a href="https://www.uol.com.br">UOL</a>.
+		Visit <a href="/live">our live</a>.
 		aewrjaewporawe
 
 		awerjaioewrhaewoi
@@ -60,7 +60,7 @@ func TestCrawler(t *testing.T) {
 		t.Errorf("want site up %t, got %t", wantUp, gotUp)
 	}
 
-	wantSites := []string{"https://golang.org", "https://www.uol.com.br"}
+	wantSites := []string{"/docs", "/live"}
 	gotSites := result.extraURLs
 
 	if !cmp.Equal(wantSites, gotSites) {
