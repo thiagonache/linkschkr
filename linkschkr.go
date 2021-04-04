@@ -30,8 +30,23 @@ func Crawler(ID int, c <-chan *Work) {
 			up:       true,
 			workerID: ID,
 		}
-
-		resp, err := http.Get(work.site)
+		var resp *http.Response
+		var err error
+		// Avoid to download binaries
+		switch {
+		case strings.HasSuffix(work.site, ".gz"):
+			resp, err = http.Head(work.site)
+		case strings.HasSuffix(work.site, ".bz2"):
+			resp, err = http.Head(work.site)
+		case strings.HasSuffix(work.site, ".msi"):
+			resp, err = http.Head(work.site)
+		case strings.HasSuffix(work.site, ".zip"):
+			resp, err = http.Head(work.site)
+		case strings.HasSuffix(work.site, ".pkg"):
+			resp, err = http.Head(work.site)
+		default:
+			resp, err = http.Get(work.site)
+		}
 		if err != nil || resp.StatusCode != 200 {
 			result.up = false
 			work.result <- result
