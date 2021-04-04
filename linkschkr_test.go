@@ -41,7 +41,7 @@ func TestCrawler(t *testing.T) {
 	ts := httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/" {
-				w.Header().Add("Content-Type", "application/json")
+				w.Header().Add("Content-Type", "application/text")
 				w.Write([]byte(body))
 			}
 		}),

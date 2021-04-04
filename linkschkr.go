@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"golang.org/x/net/html"
 )
@@ -55,7 +56,13 @@ func ParseHREF(r io.Reader) []string {
 		if n.Type == html.ElementNode && n.Data == "a" {
 			for _, a := range n.Attr {
 				if a.Key == "href" {
-					links = append(links, a.Val)
+					if a.Val == "/" {
+						continue
+					}
+					if strings.HasPrefix(a.Val, "/") {
+						links = append(links, a.Val)
+					}
+
 				}
 			}
 		}
@@ -76,8 +83,9 @@ func Run(sites []string) {
 	for n := 0; n < nWorkers; n++ {
 		go Crawler(n, work)
 	}
-
+	alreadyChecked := map[string]struct{}{}
 	for _, s := range sites {
+		alreadyChecked[s] = struct{}{}
 		go func(s string) {
 			work <- &Work{
 				site:   s,
@@ -85,20 +93,30 @@ func Run(sites []string) {
 			}
 		}(s)
 	}
-
+	//count := 0
 	for {
 		v := <-results
+		alreadyChecked[v.site] = struct{}{}
+		// count++
+		// if count > 4 {
+		// 	break
+		// }
 		up := "up"
 		if !v.up {
 			up = "down"
 		}
-		for _, s := range v.extraURLs {
-			go func(s string) {
-				work <- &Work{
-					site:   s,
-					result: results,
-				}
-			}(s)
+		for _, u := range v.extraURLs {
+			url := strings.Split(v.site, "/")
+			s := fmt.Sprintf("%s//%s%s", url[0], url[2], u)
+			_, ok := alreadyChecked[s]
+			if !ok {
+				go func(s string) {
+					work <- &Work{
+						site:   s,
+						result: results,
+					}
+				}(s)
+			}
 		}
 		fmt.Printf("Site %q is %q.\nThese links were found: %q\n", v.site, up, v.extraURLs)
 	}
