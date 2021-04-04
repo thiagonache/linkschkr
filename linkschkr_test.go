@@ -61,7 +61,7 @@ func TestCrawler(t *testing.T) {
 	}
 
 	wantSites := []string{"/docs", "/live"}
-	gotSites := result.extraURLs
+	gotSites := result.extraURIs
 
 	if !cmp.Equal(wantSites, gotSites) {
 		t.Errorf(cmp.Diff(wantSites, gotSites))
