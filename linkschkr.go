@@ -18,7 +18,7 @@ type Work struct {
 type Result struct {
 	site      string
 	up        bool
-	extraURLs []string
+	extraURIs []string
 	workerID  int
 }
 
@@ -39,7 +39,7 @@ func Crawler(ID int, c <-chan *Work) {
 		}
 
 		extraSites := ParseHREF(resp.Body)
-		result.extraURLs = extraSites
+		result.extraURIs = extraSites
 		work.result <- result
 	}
 }
@@ -105,11 +105,12 @@ func Run(sites []string) {
 		if !v.up {
 			up = "down"
 		}
-		for _, u := range v.extraURLs {
+		for _, u := range v.extraURIs {
 			url := strings.Split(v.site, "/")
 			s := fmt.Sprintf("%s//%s%s", url[0], url[2], u)
 			_, ok := alreadyChecked[s]
 			if !ok {
+				alreadyChecked[s] = struct{}{}
 				go func(s string) {
 					work <- &Work{
 						site:   s,
