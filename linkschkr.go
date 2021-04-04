@@ -91,7 +91,7 @@ func ParseHREF(r io.Reader) []string {
 }
 
 func Run(sites []string) {
-	nWorkers := 2
+	nWorkers := 1000
 	work := make(chan *Work)
 	results := make(chan *Result)
 
@@ -134,6 +134,6 @@ func Run(sites []string) {
 				}(s)
 			}
 		}
-		fmt.Printf("Site %q is %q.\nThese links were found: %q\n", v.site, up, v.extraURLs)
+		fmt.Printf("Site %q is %q.\n", v.site, up)
 	}
 }
