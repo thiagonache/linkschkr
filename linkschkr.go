@@ -53,14 +53,14 @@ func Crawler(ID int, c <-chan *Work) {
 			continue
 		}
 
-		extraSites := ParseHREF(resp.Body)
-		result.extraURIs = extraSites
+		extraURIs := ParseHREF(resp.Body)
+		result.extraURIs = extraURIs
 		work.result <- result
 	}
 }
 
 func ParseHREF(r io.Reader) []string {
-	links := []string{}
+	URIs := []string{}
 
 	doc, err := html.Parse(r)
 	if err != nil {
@@ -75,7 +75,7 @@ func ParseHREF(r io.Reader) []string {
 						continue
 					}
 					if strings.HasPrefix(a.Val, "/") {
-						links = append(links, a.Val)
+						URIs = append(URIs, a.Val)
 					}
 
 				}
@@ -87,7 +87,7 @@ func ParseHREF(r io.Reader) []string {
 	}
 	f(doc)
 
-	return links
+	return URIs
 }
 
 func Run(sites []string) {
