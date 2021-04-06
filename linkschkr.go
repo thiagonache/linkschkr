@@ -90,6 +90,13 @@ func ParseHREF(r io.Reader) []string {
 	return URIs
 }
 
+func SendWork(s string, work chan *Work, results chan *Result) {
+	work <- &Work{
+		site:   s,
+		result: results,
+	}
+}
+
 func Run(sites []string) {
 	nWorkers := 1000
 	work := make(chan *Work)
@@ -101,21 +108,11 @@ func Run(sites []string) {
 	alreadyChecked := map[string]struct{}{}
 	for _, s := range sites {
 		alreadyChecked[s] = struct{}{}
-		go func(s string) {
-			work <- &Work{
-				site:   s,
-				result: results,
-			}
-		}(s)
+		go SendWork(s, work, results)
 	}
-	//count := 0
 	for {
 		v := <-results
 		alreadyChecked[v.site] = struct{}{}
-		// count++
-		// if count > 4 {
-		// 	break
-		// }
 		up := "up"
 		if !v.up {
 			up = "down"
@@ -126,12 +123,7 @@ func Run(sites []string) {
 			_, ok := alreadyChecked[s]
 			if !ok {
 				alreadyChecked[s] = struct{}{}
-				go func(s string) {
-					work <- &Work{
-						site:   s,
-						result: results,
-					}
-				}(s)
+				go SendWork(s, work, results)
 			}
 		}
 		fmt.Printf("Site %q is %q.\n", v.site, up)
