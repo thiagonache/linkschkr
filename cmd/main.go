@@ -1,7 +1,13 @@
 package main
 
-import "linkschkr"
+import (
+	"linkschkr"
+	"log"
+)
 
 func main() {
-	linkschkr.Run(1000, []string{"https://golang.org"})
+	lk := linkschkr.New([]string{"https://golang.org"})
+	if err := lk.Run(); err != nil {
+		log.Fatal(err)
+	}
 }
