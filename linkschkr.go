@@ -106,38 +106,6 @@ func SendWork(s string, work chan *Work, results chan *Result) {
 	}
 }
 
-func Run(w io.Writer, nWorkers int, sites []string) {
-	work := make(chan *Work)
-	results := make(chan *Result)
-
-	for n := 0; n < nWorkers; n++ {
-		go Crawler(n, work)
-	}
-	alreadyChecked := map[string]struct{}{}
-	for _, s := range sites {
-		alreadyChecked[s] = struct{}{}
-		go SendWork(s, work, results)
-	}
-	for {
-		v := <-results
-		alreadyChecked[v.site] = struct{}{}
-		up := "up"
-		if !v.up {
-			up = "down"
-		}
-		for _, u := range v.extraURIs {
-			url := strings.Split(v.site, "/")
-			s := fmt.Sprintf("%s//%s%s", url[0], url[2], u)
-			_, ok := alreadyChecked[s]
-			if !ok {
-				alreadyChecked[s] = struct{}{}
-				go SendWork(s, work, results)
-			}
-		}
-		fmt.Fprintf(w, "Site %q is %q.\n", v.site, up)
-	}
-}
-
 type Option func(*Check)
 
 func New(URLs []string, opts ...Option) *Check {
