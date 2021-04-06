@@ -70,7 +70,7 @@ func TestCrawler(t *testing.T) {
 	}
 }
 
-func TestRun(t *testing.T) {
+func TestRunNoRecursion(t *testing.T) {
 	t.Parallel()
 
 	wantWorkers := 2
