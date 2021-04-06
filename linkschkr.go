@@ -94,8 +94,7 @@ func SendWork(s string, work chan *Work, results chan *Result) {
 	}
 }
 
-func Run(sites []string) {
-	nWorkers := 1000
+func Run(nWorkers int, sites []string) {
 	work := make(chan *Work)
 	results := make(chan *Result)
 
