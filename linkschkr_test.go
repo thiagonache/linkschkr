@@ -18,7 +18,7 @@ func TestCrawler(t *testing.T) {
 	results := make(chan *Result)
 
 	for n := 0; n < nWorkers; n++ {
-		go Crawler(n, work)
+		go Crawler(work)
 	}
 
 	body := `<html>
@@ -96,6 +96,10 @@ func TestRunNoRecursion(t *testing.T) {
 	}
 
 	// wantURIs := []string{}
+	// result := <-checker.Result
+	// gotURIs := result.extraURIs
 
-	// gotURIs := checker.URLs
+	// if !cmp.Equal(wantURIs, gotURIs) {
+	// 	t.Errorf(cmp.Diff(wantURIs, gotURIs))
+	// }
 }

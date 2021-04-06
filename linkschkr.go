@@ -31,16 +31,14 @@ type Result struct {
 	site      string
 	up        bool
 	extraURIs []string
-	workerID  int
 }
 
-func Crawler(ID int, c <-chan *Work) {
+func Crawler(c <-chan *Work) {
 	for {
 		work := <-c
 		result := &Result{
-			site:     work.site,
-			up:       true,
-			workerID: ID,
+			site: work.site,
+			up:   true,
 		}
 		var resp *http.Response
 		var err error
@@ -194,7 +192,6 @@ func (chk *Check) Fetcher(c chan<- *Result) {
 				site:      v.site,
 				up:        true,
 				extraURIs: []string{"/doc"},
-				workerID:  0,
 			}
 		case <-chk.Done:
 			return
