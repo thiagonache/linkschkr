@@ -71,9 +71,6 @@ func ParseHREF(r io.Reader) []string {
 		if n.Type == html.ElementNode && n.Data == "a" {
 			for _, a := range n.Attr {
 				if a.Key == "href" {
-					if a.Val == "/" {
-						continue
-					}
 					if strings.HasPrefix(a.Val, "/") {
 						URIs = append(URIs, a.Val)
 					}
