@@ -28,45 +28,9 @@ type Work struct {
 }
 
 type Result struct {
-	site      string
-	up        bool
-	extraURIs []string
-}
-
-func Crawler(c <-chan *Work) {
-	for {
-		work := <-c
-		result := &Result{
-			site: work.site,
-			up:   true,
-		}
-		var resp *http.Response
-		var err error
-		// Avoid to download binaries
-		switch {
-		case strings.HasSuffix(work.site, ".gz"):
-			resp, err = http.Head(work.site)
-		case strings.HasSuffix(work.site, ".bz2"):
-			resp, err = http.Head(work.site)
-		case strings.HasSuffix(work.site, ".msi"):
-			resp, err = http.Head(work.site)
-		case strings.HasSuffix(work.site, ".zip"):
-			resp, err = http.Head(work.site)
-		case strings.HasSuffix(work.site, ".pkg"):
-			resp, err = http.Head(work.site)
-		default:
-			resp, err = http.Get(work.site)
-		}
-		if err != nil || resp.StatusCode != 200 {
-			result.up = false
-			work.result <- result
-			continue
-		}
-
-		extraURIs := ParseHREF(resp.Body)
-		result.extraURIs = extraURIs
-		work.result <- result
-	}
+	site       string
+	up         bool
+	extraSites []string
 }
 
 func ParseHREF(r io.Reader) []string {
@@ -109,11 +73,9 @@ type Option func(*Check)
 func New(URLs []string, opts ...Option) *Check {
 	result := make(chan *Result)
 	work := make(chan *Work)
-	done := make(chan bool)
 
 	chk := &Check{
 		alreadyChecked: make(map[string]bool),
-		Done:           done,
 		NWorkers:       3,
 		Output:         os.Stdout,
 		Recursive:      true,
@@ -146,40 +108,37 @@ func WithOutput(w io.Writer) Option {
 }
 
 func (chk *Check) Run() error {
+	tasks := 0
 	for x := 0; x < chk.NWorkers; x++ {
 		go chk.Fetcher(chk.Result)
 	}
 	for _, url := range chk.URLs {
+		tasks++
 		go SendWork(url, chk.Work, chk.Result)
 	}
 	for {
 		select {
-		case <-chk.Done:
-			return nil
 		case v := <-chk.Result:
+			tasks--
 			chk.alreadyChecked[v.site] = true
 			up := "up"
 			if !v.up {
 				up = "down"
 			}
 			fmt.Fprintf(chk.Output, "Site %q is %q.\n", v.site, up)
-			//fmt.Printf("Site %q is %q.\n", v.site, up)
 			if !chk.Recursive {
 				return nil
 			}
-			if len(v.extraURIs) == 0 {
-				return nil
-			}
-
-			for _, u := range v.extraURIs {
-				url := strings.Split(v.site, "/")
-				s := fmt.Sprintf("%s//%s%s", url[0], url[2], u)
+			for _, s := range v.extraSites {
 				if !chk.alreadyChecked[s] {
 					chk.alreadyChecked[s] = true
+					tasks++
 					go SendWork(s, chk.Work, chk.Result)
 				}
 			}
-
+			if tasks == 0 {
+				return nil
+			}
 		}
 	}
 }
@@ -188,13 +147,32 @@ func (chk *Check) Fetcher(c chan<- *Result) {
 	for {
 		select {
 		case v := <-chk.Work:
-			c <- &Result{
-				site:      v.site,
-				up:        true,
-				extraURIs: []string{"/doc"},
+			result := &Result{
+				site: v.site,
+				up:   true,
 			}
-		case <-chk.Done:
-			return
+			resp, err := http.Head(v.site)
+			if err != nil || (resp.StatusCode != 200 && resp.StatusCode != 405) {
+				fmt.Println(resp.StatusCode, err)
+				result.up = false
+				c <- result
+				continue
+			}
+			ct := resp.Header.Get("Content-Type")
+			if !strings.HasPrefix(ct, "text/html") {
+				break
+			}
+			resp, err = http.Get(v.site)
+			extraURIs := ParseHREF(resp.Body)
+			for _, uri := range extraURIs {
+				url := strings.Split(v.site, "/")
+				s := fmt.Sprintf("%s//%s%s", url[0], url[2], uri)
+				if !chk.alreadyChecked[s] {
+					result.extraSites = append(result.extraSites, s)
+				}
+			}
+
+			c <- result
 		}
 	}
 }
