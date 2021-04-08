@@ -1,35 +1,83 @@
-package linkschkr
+package links_test
 
 import (
 	"bytes"
-	"fmt"
+	"links"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 )
 
-func TestRunNoRecursion(t *testing.T) {
+func TestValidLinkIntegration(t *testing.T) {
 	t.Parallel()
-
-	wantWorkers := 2
-	stdout := &bytes.Buffer{}
-	checker := New([]string{"https://golang.org"},
-		WithNumberWorkers(2),
-		WithRunRecursively(false),
-		WithOutput(stdout),
+	if os.Getenv("INTEGRATION_TESTS_ENABLED") == "" {
+		t.Skip("Set INTEGRATION_TESTS_ENABLED=true to run integration tests")
+	}
+	checker := links.NewChecker("https://golang.org",
+		links.WithWorkers(2),
+		links.WithRunRecursively(false),
 	)
+	wantWorkers := 2
 	gotWorkers := checker.NWorkers
 	if wantWorkers != gotWorkers {
 		t.Errorf("want %d workers but got %d", wantWorkers, gotWorkers)
 	}
-
-	wantStdout := fmt.Sprintln(`Site "https://golang.org" is "up".`)
 	err := checker.Run()
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotStdout := stdout.String()
-	if !cmp.Equal(wantStdout, gotStdout) {
-		t.Errorf(cmp.Diff(wantStdout, gotStdout))
+	wantBrokenLinks := []links.Result{}
+	gotBrokenLinks := checker.BrokenLinks
+	if !cmp.Equal(wantBrokenLinks, gotBrokenLinks) {
+		t.Errorf(cmp.Diff(wantBrokenLinks, gotBrokenLinks))
+	}
+}
+
+func TestValidLink(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewTLSServer(http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	checker := links.NewChecker(ts.URL,
+		links.WithHTTPClient(ts.Client()),
+	)
+	err := checker.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBrokenLinks := []links.Result{}
+	gotBrokenLinks := checker.BrokenLinks
+	if !cmp.Equal(wantBrokenLinks, gotBrokenLinks) {
+		t.Errorf(cmp.Diff(wantBrokenLinks, gotBrokenLinks))
+	}
+}
+
+func TestNotFoundLink(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewTLSServer(http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	buf := &bytes.Buffer{}
+	checker := links.NewChecker(ts.URL,
+		links.WithOutput(buf),
+		links.WithHTTPClient(ts.Client()),
+	)
+	err := checker.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBrokenLinks := []links.Result{
+		{
+			URL: ts.URL,
+			Err: nil,
+			StatusCode: http.StatusNotFound,
+		},
+	}
+	gotBrokenLinks := checker.BrokenLinks
+	if !cmp.Equal(wantBrokenLinks, gotBrokenLinks) {
+		t.Errorf(cmp.Diff(wantBrokenLinks, gotBrokenLinks))
 	}
 }

@@ -1,4 +1,4 @@
-module linkschkr
+module links
 
 go 1.16
 

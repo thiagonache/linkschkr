@@ -1,12 +1,12 @@
 package main
 
 import (
-	"linkschkr"
+	"links"
 	"log"
 )
 
 func main() {
-	lk := linkschkr.New([]string{"https://golang.org"})
+	lk := links.NewChecker([]string{"https://golang.org"})
 	if err := lk.Run(); err != nil {
 		log.Fatal(err)
 	}

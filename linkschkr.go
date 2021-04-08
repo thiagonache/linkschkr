@@ -1,4 +1,4 @@
-package linkschkr
+package links
 
 import (
 	"fmt"
@@ -11,15 +11,17 @@ import (
 	"golang.org/x/net/html"
 )
 
-type Check struct {
+type Checker struct {
 	alreadyChecked  map[string]bool
 	Done            chan bool
 	Limit, NWorkers int
 	Output          io.Writer
 	Recursive       bool
 	Result          chan *Result
-	URLs            []string
+	URL             string
 	Work            chan *Work
+	HTTPClient      *http.Client
+	BrokenLinks     []Result
 }
 
 type Work struct {
@@ -28,9 +30,10 @@ type Work struct {
 }
 
 type Result struct {
-	site       string
-	up         bool
-	extraSites []string
+	URL        string
+	Err        error
+	StatusCode int
+	ExtraSites []string
 }
 
 func ParseHREF(r io.Reader) []string {
@@ -48,7 +51,6 @@ func ParseHREF(r io.Reader) []string {
 					if strings.HasPrefix(a.Val, "/") {
 						URIs = append(URIs, a.Val)
 					}
-
 				}
 			}
 		}
@@ -68,20 +70,21 @@ func SendWork(s string, work chan *Work, results chan *Result) {
 	}
 }
 
-type Option func(*Check)
+type Option func(*Checker)
 
-func New(URLs []string, opts ...Option) *Check {
+func NewChecker(URL string, opts ...Option) *Checker {
 	result := make(chan *Result)
 	work := make(chan *Work)
 
-	chk := &Check{
+	chk := &Checker{
 		alreadyChecked: make(map[string]bool),
 		NWorkers:       3,
 		Output:         os.Stdout,
 		Recursive:      true,
 		Result:         result,
-		URLs:           URLs,
+		URL:            URL,
 		Work:           work,
+		BrokenLinks:	[]Result{},
 	}
 	for _, o := range opts {
 		o(chk)
@@ -89,90 +92,101 @@ func New(URLs []string, opts ...Option) *Check {
 	return chk
 }
 
-func WithNumberWorkers(n int) Option {
-	return func(c *Check) {
+func WithWorkers(n int) Option {
+	return func(c *Checker) {
 		c.NWorkers = n
 	}
 }
 
 func WithRunRecursively(b bool) Option {
-	return func(c *Check) {
+	return func(c *Checker) {
 		c.Recursive = b
 	}
 }
 
 func WithOutput(w io.Writer) Option {
-	return func(c *Check) {
+	return func(c *Checker) {
 		c.Output = w
 	}
 }
 
-func (chk *Check) Run() error {
-	tasks := 0
-	for x := 0; x < chk.NWorkers; x++ {
-		go chk.Fetcher(chk.Result)
-	}
-	for _, url := range chk.URLs {
-		tasks++
-		go SendWork(url, chk.Work, chk.Result)
-	}
-	for {
-		select {
-		case v := <-chk.Result:
-			tasks--
-			chk.alreadyChecked[v.site] = true
-			up := "up"
-			if !v.up {
-				up = "down"
-			}
-			fmt.Fprintf(chk.Output, "Site %q is %q.\n", v.site, up)
-			if !chk.Recursive {
-				return nil
-			}
-			for _, s := range v.extraSites {
-				if !chk.alreadyChecked[s] {
-					chk.alreadyChecked[s] = true
-					tasks++
-					go SendWork(s, chk.Work, chk.Result)
-				}
-			}
-			if tasks == 0 {
-				return nil
-			}
-		}
+func WithHTTPClient(client *http.Client) Option {
+	return func(c *Checker) {
+		c.HTTPClient = client
 	}
 }
 
-func (chk *Check) Fetcher(c chan<- *Result) {
-	for {
-		select {
-		case v := <-chk.Work:
-			result := &Result{
-				site: v.site,
-				up:   true,
-			}
-			resp, err := http.Head(v.site)
-			if err != nil || (resp.StatusCode != 200 && resp.StatusCode != 405) {
-				fmt.Println(resp.StatusCode, err)
-				result.up = false
-				c <- result
-				continue
-			}
-			ct := resp.Header.Get("Content-Type")
-			if !strings.HasPrefix(ct, "text/html") {
-				break
-			}
-			resp, err = http.Get(v.site)
-			extraURIs := ParseHREF(resp.Body)
-			for _, uri := range extraURIs {
-				url := strings.Split(v.site, "/")
-				s := fmt.Sprintf("%s//%s%s", url[0], url[2], uri)
-				if !chk.alreadyChecked[s] {
-					result.extraSites = append(result.extraSites, s)
-				}
-			}
-
-			c <- result
+func (c *Checker) Run() error {
+	tasks := 0
+	for x := 0; x < c.NWorkers; x++ {
+		go c.Fetcher(c.Result)
+	}
+	tasks++
+	go SendWork(c.URL, c.Work, c.Result)
+	for v := range c.Result {
+		tasks--
+		c.alreadyChecked[v.URL] = true
+		if v.Err != nil || v.StatusCode != http.StatusOK {
+			c.BrokenLinks = append(c.BrokenLinks, *v)
 		}
+		if !c.Recursive {
+			return nil
+		}
+		for _, s := range v.ExtraSites {
+			if !c.alreadyChecked[s] {
+				c.alreadyChecked[s] = true
+				tasks++
+				go SendWork(s, c.Work, c.Result)
+			}
+		}
+		if tasks == 0 {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (c *Checker) Fetcher(results chan<- *Result) {
+	for v := range c.Work {
+		result := &Result{
+			URL: v.site,
+		}
+		resp, err := c.HTTPClient.Head(v.site)
+		if err != nil {
+			result.Err = err
+			results <- result
+			continue
+		}
+		result.StatusCode = resp.StatusCode
+		if resp.StatusCode != http.StatusOK {
+			results <- result
+			continue
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.HasPrefix(ct, "text/html") {
+			results <- result
+			break
+		}
+		resp, err = c.HTTPClient.Get(v.site)
+		if err != nil {
+			result.Err = err
+			results <- result
+			continue
+		}
+		result.StatusCode = resp.StatusCode
+		if resp.StatusCode != http.StatusOK {
+			results <- result
+			continue
+		}
+		extraURIs := ParseHREF(resp.Body)
+		for _, uri := range extraURIs {
+			url := strings.Split(v.site, "/")
+			s := fmt.Sprintf("%s//%s%s", url[0], url[2], uri)
+			if !c.alreadyChecked[s] {
+				result.ExtraSites = append(result.ExtraSites, s)
+			}
+		}
+
+		results <- result
 	}
 }
