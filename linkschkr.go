@@ -7,33 +7,36 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/net/html"
 )
 
 type Checker struct {
-	alreadyChecked  map[string]bool
-	Done            chan bool
-	Limit, NWorkers int
-	Output          io.Writer
-	Recursive       bool
-	Result          chan *Result
-	URL             string
-	Work            chan *Work
-	HTTPClient      *http.Client
-	BrokenLinks     []Result
+	alreadyChecked map[string]bool
+	BrokenLinks    []Result
+	Done           chan bool
+	HTTPClient     http.Client
+	Limit          time.Duration
+	NWorkers       int
+	Output         io.Writer
+	Recursive      bool
+	Result         chan *Result
+	SuccessLinks   []Result
+	URL            string
+	Work           chan *Work
 }
 
 type Work struct {
-	site   string
 	result chan *Result
+	site   string
 }
 
 type Result struct {
-	URL        string
 	Err        error
-	StatusCode int
 	ExtraSites []string
+	StatusCode int
+	URL        string
 }
 
 func ParseHREF(r io.Reader) []string {
@@ -78,13 +81,14 @@ func NewChecker(URL string, opts ...Option) *Checker {
 
 	chk := &Checker{
 		alreadyChecked: make(map[string]bool),
-		NWorkers:       3,
+		BrokenLinks:    []Result{},
+		Limit:          500,
 		Output:         os.Stdout,
 		Recursive:      true,
 		Result:         result,
+		SuccessLinks:   []Result{},
 		URL:            URL,
 		Work:           work,
-		BrokenLinks:	[]Result{},
 	}
 	for _, o := range opts {
 		o(chk)
