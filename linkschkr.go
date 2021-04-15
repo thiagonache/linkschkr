@@ -66,10 +66,11 @@ func ParseHREF(r io.Reader) []string {
 	return URIs
 }
 
-func SendWork(s string, work chan *Work, results chan *Result) {
-	work <- &Work{
+func (c *Checker) SendWork(s string) {
+	go c.Fetcher(c.Result)
+	c.Work <- &Work{
 		site:   s,
-		result: results,
+		result: c.Result,
 	}
 }
 
@@ -96,12 +97,6 @@ func NewChecker(URL string, opts ...Option) *Checker {
 	return chk
 }
 
-func WithWorkers(n int) Option {
-	return func(c *Checker) {
-		c.NWorkers = n
-	}
-}
-
 func WithRunRecursively(b bool) Option {
 	return func(c *Checker) {
 		c.Recursive = b
@@ -114,48 +109,73 @@ func WithOutput(w io.Writer) Option {
 	}
 }
 
-func WithHTTPClient(client *http.Client) Option {
+func WithHTTPClient(client http.Client) Option {
 	return func(c *Checker) {
 		c.HTTPClient = client
 	}
 }
 
-func (c *Checker) Run() error {
-	tasks := 0
-	for x := 0; x < c.NWorkers; x++ {
-		go c.Fetcher(c.Result)
+func WithRateLimit(ms int) Option {
+	return func(c *Checker) {
+		c.Limit = time.Duration(ms)
 	}
+}
+
+func (c *Checker) Run() ([]Result, []Result, error) {
+	total := 0
+	tasks := 0
+	errors := 0
+
+	limiter := time.NewTicker(c.Limit * time.Millisecond)
 	tasks++
-	go SendWork(c.URL, c.Work, c.Result)
+	go c.SendWork(c.URL)
 	for v := range c.Result {
 		tasks--
+		total++
 		c.alreadyChecked[v.URL] = true
 		if v.Err != nil || v.StatusCode != http.StatusOK {
+			errors++
 			c.BrokenLinks = append(c.BrokenLinks, *v)
+		} else {
+			c.SuccessLinks = append(c.SuccessLinks, *v)
 		}
 		if !c.Recursive {
-			return nil
+			return c.SuccessLinks, c.BrokenLinks, nil
 		}
 		for _, s := range v.ExtraSites {
 			if !c.alreadyChecked[s] {
 				c.alreadyChecked[s] = true
 				tasks++
-				go SendWork(s, c.Work, c.Result)
+				<-limiter.C
+				go c.SendWork(s)
 			}
 		}
 		if tasks == 0 {
-			return nil
+			return c.SuccessLinks, c.BrokenLinks, nil
 		}
+
 	}
-	return nil
+	return c.SuccessLinks, c.BrokenLinks, nil
 }
 
+func (c *Checker) DoRequest(method, site string, client *http.Client) (*http.Response, error) {
+	req, err := http.NewRequest(method, site, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("user-agent", "Linkschkr 0.0.1 Beta")
+	req.Header.Set("accept", "*/*")
+	resp, err := client.Do(req)
+
+	return resp, err
+}
 func (c *Checker) Fetcher(results chan<- *Result) {
+	client := c.HTTPClient
 	for v := range c.Work {
 		result := &Result{
 			URL: v.site,
 		}
-		resp, err := c.HTTPClient.Head(v.site)
+		resp, err := c.DoRequest("HEAD", v.site, &client)
 		if err != nil {
 			result.Err = err
 			results <- result
@@ -171,7 +191,7 @@ func (c *Checker) Fetcher(results chan<- *Result) {
 			results <- result
 			break
 		}
-		resp, err = c.HTTPClient.Get(v.site)
+		resp, err = c.DoRequest("GET", v.site, &client)
 		if err != nil {
 			result.Err = err
 			results <- result
@@ -185,10 +205,9 @@ func (c *Checker) Fetcher(results chan<- *Result) {
 		extraURIs := ParseHREF(resp.Body)
 		for _, uri := range extraURIs {
 			url := strings.Split(v.site, "/")
-			s := fmt.Sprintf("%s//%s%s", url[0], url[2], uri)
-			if !c.alreadyChecked[s] {
-				result.ExtraSites = append(result.ExtraSites, s)
-			}
+			urlFull := fmt.Sprintf("%s//%s%s", url[0], url[2], uri)
+			urlNoQueryString := strings.Split(urlFull, "?")[0]
+			result.ExtraSites = append(result.ExtraSites, urlNoQueryString)
 		}
 
 		results <- result
