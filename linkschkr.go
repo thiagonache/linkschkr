@@ -35,6 +35,12 @@ func (c *Checked) Get(key string) bool {
 	return ok
 }
 
+type Result struct {
+	Error        error
+	ResponseCode int
+	State        string
+	URL          string
+}
 type Option func(*Limiter)
 
 type Limiter struct {
@@ -46,7 +52,7 @@ type Limiter struct {
 	Quite      bool
 	Rate       Rate
 	Recursive  bool
-	Result     chan int
+	Result     chan *Result
 	Stdout     io.Writer
 }
 
@@ -85,6 +91,7 @@ func (l *Limiter) Start(checked *Checked, counter *Counter) {
 	fmt.Fprintf(l.Debug, "[%s] [%s] starting\n", time.Now().Format(time.RFC3339), "Limiter")
 	ticker := time.NewTicker(l.Rate.Interval)
 	for {
+		fmt.Fprintf(l.Debug, "[%s] [%s] waiting on ticker channel\n", time.Now().Format(time.RFC3339), "Limiter")
 		<-ticker.C
 		fmt.Fprintf(l.Debug, "[%s] [%s] waiting on input channel\n", time.Now().Format(time.RFC3339), "Limiter")
 		site := <-l.Input
@@ -129,53 +136,74 @@ func (l *Limiter) SendWork(site string, c *Checked) {
 
 func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 	defer w.Dec()
+	defer fmt.Fprintf(l.Debug, "[%s] [%s] decrementing fetchers\n", time.Now().Format(time.RFC3339), "Fetcher")
 	fmt.Fprintf(l.Debug, "[%s] [%s] started\n", time.Now().Format(time.RFC3339), "Fetcher")
 	// it costs a lock for no reason when debug is disable. To be reconsidered.
 	//fmt.Fprintf(l.Debug, "[%s] [%s] running %d fetchers\n", time.Now().Format(time.RFC3339), "Fetcher", w.Get())
 	client := &l.HTTPClient
 	fmt.Fprintf(l.Stdout, "[%s] [%s] checking site %s\n", time.Now().Format(time.RFC3339), "Fetcher", site)
 	resp, err := l.DoRequest("HEAD", site, client)
-	if err != nil {
-		log.Fatal(err)
+	result := &Result{
+		URL:          site,
+		ResponseCode: resp.StatusCode,
 	}
-	//fmt.Fprintf(c.Debug, "[%v] [%s] Response code %d\n", time.Now().Format(time.RFC3339), site, resp.StatusCode)
-	//result.StatusCode = resp.StatusCode
-	if resp.StatusCode != http.StatusOK {
+	if err != nil {
+		result.State = "unkown"
+		result.Error = err
+		l.Result <- result
+		l.Quit <- struct{}{}
+		return
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusMethodNotAllowed {
+		result.State = "down"
+		result.Error = fmt.Errorf("unexpected response code %d", resp.StatusCode)
+		l.Result <- result
 		if !l.Recursive {
 			l.Quit <- struct{}{}
-			return
 		}
 		return
 	}
 	ct := resp.Header.Get("Content-Type")
-	//fmt.Fprintf(c.Debug, "[%v] [%s] Content type %s\n", time.Now().Format(time.RFC3339), site, ct)
+	fmt.Fprintf(l.Debug, "[%v] [%s] Content type %s\n", time.Now().Format(time.RFC3339), "Fetcher", ct)
 	if !strings.HasPrefix(ct, "text/html") {
 		if !l.Recursive {
+			result.State = "up"
+			l.Result <- result
 			l.Quit <- struct{}{}
-			return
 		}
 		return
 	}
-	//fmt.Fprintf(c.Debug, "[%v] [%s] Run GET method\n", time.Now().Format(time.RFC3339), site)
+
+	fmt.Fprintf(l.Debug, "[%v] [%s] Run GET method\n", time.Now().Format(time.RFC3339), "Fetcher")
 	resp, err = l.DoRequest("GET", site, client)
 	if err != nil {
+		// should I put it between the request and the error handling?! to be discussed
+		result.ResponseCode = resp.StatusCode
+		result.State = "unkown"
+		result.Error = err
+		l.Result <- result
 		if !l.Recursive {
 			l.Quit <- struct{}{}
-			return
 		}
 		return
 	}
+	result.ResponseCode = resp.StatusCode
+	fmt.Fprintf(l.Debug, "[%s] [%s] response code %d\n", time.Now().Format(time.RFC3339), "Fetcher", resp.StatusCode)
+	fmt.Fprintf(l.Debug, "[%s] [%s] done\n", time.Now().Format(time.RFC3339), "Fetcher")
 	//fmt.Fprintf(c.Debug, "[%v] [%s] Response code %d\n", time.Now().Format(time.RFC3339), site, resp.StatusCode)
 	//result.StatusCode = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
+		result.State = "down"
+		result.Error = fmt.Errorf("unexpected response code %d", resp.StatusCode)
+		l.Result <- result
 		if !l.Recursive {
 			l.Quit <- struct{}{}
-			return
 		}
 		return
 	}
-	fmt.Fprintf(l.Stdout, "[%s] [%s] Done\n", time.Now().Format(time.RFC3339), "Fetcher")
 
+	result.State = "up"
+	l.Result <- result
 	if !l.Recursive {
 		l.Quit <- struct{}{}
 		return
@@ -186,9 +214,6 @@ func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 	}
 	//fmt.Fprintf(c.Debug, "[%v] [%s] Extra sites %q\n", time.Now().Format(time.RFC3339), site, extraSites)
 	//result.ExtraSites = append(result.ExtraSites, extraSites...)
-
-	l.Result <- resp.StatusCode
-
 }
 
 func (l *Limiter) ParseHREF(r io.Reader, site string) []string {
@@ -202,6 +227,8 @@ func (l *Limiter) ParseHREF(r io.Reader, site string) []string {
 	for _, n := range list {
 		href := htmlquery.SelectAttr(n, "href")
 		switch {
+		case strings.HasPrefix(href, "//"):
+			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().Format(time.RFC3339), "ParseHREF")
 		case strings.HasPrefix(href, "/"):
 			shouldTrim := strings.HasSuffix(href, "/")
 			if shouldTrim {
@@ -212,10 +239,10 @@ func (l *Limiter) ParseHREF(r io.Reader, site string) []string {
 			u, _ := url.Parse(site)
 			baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
-			// case strings.HasPrefix(href, "http://"):
-			// 	extraURLs = append(extraURLs, href)
-			// case strings.HasPrefix(href, "https://"):
-			// 	extraURLs = append(extraURLs, href)
+		case strings.HasPrefix(href, "http://"):
+			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().Format(time.RFC3339), "ParseHREF")
+		case strings.HasPrefix(href, "https://"):
+			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().Format(time.RFC3339), "ParseHREF")
 		}
 	}
 	return extraURLs
@@ -230,13 +257,13 @@ func Run(site string, opts ...Option) {
 		Quite: false,
 		Rate: Rate{
 			Count:    0,
-			Max:      20,
+			Max:      2,
 			Start:    time.Time{},
 			Interval: 5 * time.Second,
-			MaxWait:  10 * time.Second,
+			MaxWait:  5 * time.Second,
 		},
 		Recursive: true,
-		Result:    make(chan int),
+		Result:    make(chan *Result),
 		Stdout:    os.Stdout,
 	}
 	for _, o := range opts {
@@ -257,7 +284,7 @@ func Run(site string, opts ...Option) {
 	for {
 		select {
 		case r := <-l.Result:
-			fmt.Println(r)
+			fmt.Fprintf(l.Stdout, "[%s] [%s] result => URL: %s State: %s Error: %v\n", time.Now().Format(time.RFC3339), "Run", r.URL, r.State, r.Error)
 		case <-l.Quit:
 			return
 		}
