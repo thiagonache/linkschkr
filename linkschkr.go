@@ -241,7 +241,9 @@ func Run(site string, opts ...Option) ([]*Result, []*Result) {
 	for _, o := range opts {
 		o(l)
 	}
+	// Set MaxRun after functional options in case the user have a custom value.
 	l.Quit = make(chan struct{}, l.Rate.MaxRun)
+
 	if l.Quite {
 		l.Debug = io.Discard
 		l.Stdout = io.Discard
