@@ -89,32 +89,32 @@ func (r *Counter) Get() int {
 }
 
 func (l *Limiter) Start(checked *Checked, counter *Counter) {
-	fmt.Fprintf(l.Debug, "[%s] [%s] starting\n", time.Now().Format(time.RFC3339), "Limiter")
+	fmt.Fprintf(l.Debug, "[%s] [%s] starting\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 	ticker := time.NewTicker(l.Rate.Interval)
 	for {
-		fmt.Fprintf(l.Debug, "[%s] [%s] waiting on ticker channel\n", time.Now().Format(time.RFC3339), "Limiter")
+		fmt.Fprintf(l.Debug, "[%s] [%s] waiting on ticker channel\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 		<-ticker.C
 		receiveOrDie := time.NewTicker(l.Rate.Interval + l.Rate.MaxWait)
-		fmt.Fprintf(l.Debug, "[%s] [%s] waiting on input channel\n", time.Now().Format(time.RFC3339), "Limiter")
+		fmt.Fprintf(l.Debug, "[%s] [%s] waiting on input channel\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 		select {
 		case site := <-l.Input:
-			fmt.Fprintf(l.Debug, "[%s] [%s] got %s\n", time.Now().Format(time.RFC3339), "Limiter", site)
-			fmt.Fprintf(l.Debug, "[%s] [%s] checking if site was already checked\n", time.Now().Format(time.RFC3339), "Limiter")
+			fmt.Fprintf(l.Debug, "[%s] [%s] got %s\n", time.Now().UTC().Format(time.RFC3339), "Limiter", site)
+			fmt.Fprintf(l.Debug, "[%s] [%s] checking if site was already checked\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 			exist := checked.Get(site)
 			for exist {
-				fmt.Fprintf(l.Debug, "[%s] [%s] already checked\n", time.Now().Format(time.RFC3339), "Limiter")
-				fmt.Fprintf(l.Debug, "[%s] [%s] waiting on input channel\n", time.Now().Format(time.RFC3339), "Limiter")
+				fmt.Fprintf(l.Debug, "[%s] [%s] already checked\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
+				fmt.Fprintf(l.Debug, "[%s] [%s] waiting on input channel\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 				site = <-l.Input
-				fmt.Fprintf(l.Debug, "[%s] [%s] got %s\n", time.Now().Format(time.RFC3339), "Limiter", site)
-				fmt.Fprintf(l.Debug, "[%s] [%s] checking if site was already checked\n", time.Now().Format(time.RFC3339), "Limiter")
+				fmt.Fprintf(l.Debug, "[%s] [%s] got %s\n", time.Now().UTC().Format(time.RFC3339), "Limiter", site)
+				fmt.Fprintf(l.Debug, "[%s] [%s] checking if site was already checked\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 				exist = checked.Get(site)
 			}
-			fmt.Fprintf(l.Debug, "[%s] [%s] adding %s to sites already checked\n", time.Now().Format(time.RFC3339), "Limiter", site)
+			fmt.Fprintf(l.Debug, "[%s] [%s] adding %s to sites already checked\n", time.Now().UTC().Format(time.RFC3339), "Limiter", site)
 			checked.Add(site)
-			fmt.Fprintf(l.Debug, "[%s] [%s] incrementing running fetchers\n", time.Now().Format(time.RFC3339), "Limiter")
+			fmt.Fprintf(l.Debug, "[%s] [%s] incrementing running fetchers\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 			counter.Inc()
-			fmt.Fprintf(l.Debug, "[%s] [%s] start fetcher goroutine\n", time.Now().Format(time.RFC3339), "Limiter")
-			go l.Fetcher(site, counter, checked)
+			fmt.Fprintf(l.Debug, "[%s] [%s] start fetcher goroutine\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
+			go l.Fetcher(site, checked)
 		case <-receiveOrDie.C:
 			l.Quit <- struct{}{}
 			return
@@ -141,14 +141,10 @@ func (l *Limiter) SendWork(site string, c *Checked) {
 	}
 }
 
-func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
-	defer w.Dec()
-	defer fmt.Fprintf(l.Debug, "[%s] [%s] decrementing fetchers\n", time.Now().Format(time.RFC3339), "Fetcher")
-	fmt.Fprintf(l.Debug, "[%s] [%s] started\n", time.Now().Format(time.RFC3339), "Fetcher")
-	// it costs a lock for no reason when debug is disable. To be reconsidered.
-	//fmt.Fprintf(l.Debug, "[%s] [%s] running %d fetchers\n", time.Now().Format(time.RFC3339), "Fetcher", w.Get())
+func (l *Limiter) Fetcher(site string, c *Checked) {
+	fmt.Fprintf(l.Debug, "[%s] [%s] started\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
 	client := &l.HTTPClient
-	fmt.Fprintf(l.Stdout, "[%s] [%s] checking site %s\n", time.Now().Format(time.RFC3339), "Fetcher", site)
+	fmt.Fprintf(l.Stdout, "[%s] [%s] checking site %s\n", time.Now().UTC().Format(time.RFC3339), "Fetcher", site)
 	resp, err := l.DoRequest("HEAD", site, client)
 	result := &Result{
 		URL: site,
@@ -170,7 +166,7 @@ func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 		return
 	}
 	ct := resp.Header.Get("Content-Type")
-	fmt.Fprintf(l.Debug, "[%v] [%s] Content type %s\n", time.Now().Format(time.RFC3339), "Fetcher", ct)
+	fmt.Fprintf(l.Debug, "[%v] [%s] Content type %s\n", time.Now().UTC().Format(time.RFC3339), "Fetcher", ct)
 	if !strings.HasPrefix(ct, "text/html") {
 		if !l.Recursive {
 			result.State = "up"
@@ -180,7 +176,7 @@ func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 		return
 	}
 
-	fmt.Fprintf(l.Debug, "[%v] [%s] Run GET method\n", time.Now().Format(time.RFC3339), "Fetcher")
+	fmt.Fprintf(l.Debug, "[%v] [%s] Run GET method\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
 	resp, err = l.DoRequest("GET", site, client)
 	if err != nil {
 		// should I put it between the request and the error handling?! to be discussed
@@ -194,8 +190,8 @@ func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 		return
 	}
 	result.ResponseCode = resp.StatusCode
-	fmt.Fprintf(l.Debug, "[%s] [%s] response code %d\n", time.Now().Format(time.RFC3339), "Fetcher", resp.StatusCode)
-	fmt.Fprintf(l.Debug, "[%s] [%s] done\n", time.Now().Format(time.RFC3339), "Fetcher")
+	fmt.Fprintf(l.Debug, "[%s] [%s] response code %d\n", time.Now().UTC().Format(time.RFC3339), "Fetcher", resp.StatusCode)
+	fmt.Fprintf(l.Debug, "[%s] [%s] done\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
 	if resp.StatusCode != http.StatusOK {
 		result.State = "down"
 		l.Fails <- result
@@ -229,7 +225,7 @@ func (l *Limiter) ParseHREF(r io.Reader, site string) []string {
 		href := htmlquery.SelectAttr(n, "href")
 		switch {
 		case strings.HasPrefix(href, "//"):
-			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().Format(time.RFC3339), "ParseHREF")
+			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseHREF")
 		case strings.HasPrefix(href, "/"):
 			shouldTrim := strings.HasSuffix(href, "/")
 			if shouldTrim {
@@ -241,9 +237,9 @@ func (l *Limiter) ParseHREF(r io.Reader, site string) []string {
 			baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
 		case strings.HasPrefix(href, "http://"):
-			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().Format(time.RFC3339), "ParseHREF")
+			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseHREF")
 		case strings.HasPrefix(href, "https://"):
-			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().Format(time.RFC3339), "ParseHREF")
+			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseHREF")
 		}
 	}
 	return extraURLs
@@ -287,10 +283,10 @@ func Run(site string, opts ...Option) ([]*Result, []*Result) {
 	for {
 		select {
 		case s := <-l.Successes:
-			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Error: %v\n", time.Now().Format(time.RFC3339), "Run", s.URL, s.State, s.Error)
+			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Error: %v\n", time.Now().UTC().Format(time.RFC3339), "Run", s.URL, s.State, s.Error)
 			responseSuccess = append(responseSuccess, s)
 		case f := <-l.Fails:
-			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Error: %v\n", time.Now().Format(time.RFC3339), "Run", f.URL, f.State, f.Error)
+			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Error: %v\n", time.Now().UTC().Format(time.RFC3339), "Run", f.URL, f.State, f.Error)
 			responseFail = append(responseFail, f)
 		case <-l.Quit:
 			return responseSuccess, responseFail
