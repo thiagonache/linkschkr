@@ -65,30 +65,7 @@ type Rate struct {
 	Start    time.Time
 }
 
-type Counter struct {
-	mu    sync.Mutex
-	count int
-}
-
-func (r *Counter) Inc() {
-	r.mu.Lock()
-	r.count++
-	r.mu.Unlock()
-}
-
-func (r *Counter) Dec() {
-	r.mu.Lock()
-	r.count--
-	r.mu.Unlock()
-}
-
-func (r *Counter) Get() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.count
-}
-
-func (l *Limiter) Start(checked *Checked, counter *Counter) {
+func (l *Limiter) Start(checked *Checked) {
 	fmt.Fprintf(l.Debug, "[%s] [%s] starting\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 	ticker := time.NewTicker(l.Rate.Interval)
 	for {
@@ -112,7 +89,6 @@ func (l *Limiter) Start(checked *Checked, counter *Counter) {
 			fmt.Fprintf(l.Debug, "[%s] [%s] adding %s to sites already checked\n", time.Now().UTC().Format(time.RFC3339), "Limiter", site)
 			checked.Add(site)
 			fmt.Fprintf(l.Debug, "[%s] [%s] incrementing running fetchers\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
-			counter.Inc()
 			fmt.Fprintf(l.Debug, "[%s] [%s] start fetcher goroutine\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 			go l.Fetcher(site, checked)
 		case <-receiveOrDie.C:
@@ -274,9 +250,8 @@ func Run(site string, opts ...Option) ([]*Result, []*Result) {
 	checked := &Checked{
 		Items: map[string]struct{}{},
 	}
-	counter := &Counter{}
 	for x := 0; x < l.Rate.MaxRun; x++ {
-		go l.Start(checked, counter)
+		go l.Start(checked)
 	}
 	go l.SendWork(site, checked)
 	responseSuccess, responseFail := []*Result{}, []*Result{}
