@@ -60,7 +60,7 @@ type Limiter struct {
 	Successes     chan *Result
 	Fails         chan *Result
 	Stdout        io.Writer
-	WaitGroup     *sync.WaitGroup
+	WaitGroup     sync.WaitGroup
 }
 
 type Rate struct {
@@ -84,11 +84,6 @@ func (l *Limiter) DoRequest(method, site string, client *http.Client) (*http.Res
 }
 
 func (l *Limiter) Fetch(site string, c *Checked) {
-	exist := c.ExistOrAdd(site)
-	if exist {
-		fmt.Fprintf(l.Stdout, "[%s] [%s] %s does not exist in sites already checked\n", time.Now().UTC().Format(time.RFC3339), "Sendwork", site)
-		return
-	}
 	fmt.Fprintf(l.Debug, "[%s] [%s] started\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
 	client := &l.HTTPClient
 	fmt.Fprintf(l.Stdout, "[%s] [%s] checking site %s\n", time.Now().UTC().Format(time.RFC3339), "Fetcher", site)
@@ -119,7 +114,6 @@ func (l *Limiter) Fetch(site string, c *Checked) {
 	fmt.Fprintf(l.Debug, "[%v] [%s] Run GET method\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
 	resp, err = l.DoRequest("GET", site, client)
 	if err != nil {
-		// should I put it between the request and the error handling?! to be discussed
 		result.ResponseCode = resp.StatusCode
 		result.State = "unkown"
 		result.Error = err
@@ -135,16 +129,17 @@ func (l *Limiter) Fetch(site string, c *Checked) {
 		return
 	}
 
-	result.State = "up"
-	l.Successes <- result
-	if !l.Recursive {
-		return
-	}
 	extraSites := l.ParseHREF(resp.Body, site)
 	for _, s := range extraSites {
-		l.WaitGroup.Add(1)
-		go l.Fetch(s, c)
+		exist := c.ExistOrAdd(s)
+		if !exist {
+			l.WaitGroup.Add(1)
+			go l.Fetch(s, c)
+		}
 	}
+
+	result.State = "up"
+	l.Successes <- result
 }
 
 func (l *Limiter) ParseHREF(r io.Reader, site string) []string {
@@ -183,13 +178,14 @@ func (l *Limiter) ReadResults() {
 	for {
 		select {
 		case s := <-l.Successes:
-			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Error: %v\n", time.Now().UTC().Format(time.RFC3339), "Run", s.URL, s.State, s.Error)
+			l.WaitGroup.Done()
+			fmt.Fprintf(l.Stdout, "[%s] [%s] result => URL: %s State: %s Code: %d Error: %v\n", time.Now().UTC().Format(time.RFC3339), "Run", s.URL, s.State, s.ResponseCode, s.Error)
 			l.ResultSuccess = append(l.ResultSuccess, s)
-			l.WaitGroup.Done()
+
 		case f := <-l.Fails:
-			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Error: %v\n", time.Now().UTC().Format(time.RFC3339), "Run", f.URL, f.State, f.Error)
-			l.ResultFail = append(l.ResultFail, f)
 			l.WaitGroup.Done()
+			fmt.Fprintf(l.Stdout, "[%s] [%s] result => URL: %s State: %s Code: %d Error: %v\n", time.Now().UTC().Format(time.RFC3339), "Run", f.URL, f.State, f.ResponseCode, f.Error)
+			l.ResultFail = append(l.ResultFail, f)
 		}
 	}
 }
@@ -206,7 +202,6 @@ func Check(site string, opts ...Option) []*Result {
 		Successes:     make(chan *Result),
 		Fails:         make(chan *Result),
 		Stdout:        os.Stdout,
-		WaitGroup:     &sync.WaitGroup{},
 	}
 	for _, o := range opts {
 		o(l)
@@ -220,7 +215,9 @@ func Check(site string, opts ...Option) []*Result {
 		Items: map[string]struct{}{},
 	}
 	go l.ReadResults()
+
 	l.WaitGroup.Add(1)
+	checked.ExistOrAdd(site)
 	go l.Fetch(site, checked)
 	l.WaitGroup.Wait()
 
