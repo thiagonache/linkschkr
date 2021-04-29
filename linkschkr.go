@@ -121,15 +121,14 @@ func (l *Limiter) Fetcher(site string, c *Checked) {
 	fmt.Fprintf(l.Debug, "[%s] [%s] started\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
 	client := &l.HTTPClient
 	fmt.Fprintf(l.Stdout, "[%s] [%s] checking site %s\n", time.Now().UTC().Format(time.RFC3339), "Fetcher", site)
-	resp, err := l.DoRequest("HEAD", site, client)
 	result := &Result{
 		URL: site,
 	}
+	resp, err := l.DoRequest("HEAD", site, client)
 	if err != nil {
 		result.State = "unkown"
 		result.Error = err
 		l.Fails <- result
-		l.Quit <- struct{}{}
 		return
 	}
 	result.ResponseCode = resp.StatusCode
@@ -275,7 +274,7 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
-func WithRunRecursively(b bool) Option {
+func WithRecursive(b bool) Option {
 	return func(l *Limiter) {
 		l.Recursive = b
 	}
