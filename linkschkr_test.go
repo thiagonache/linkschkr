@@ -19,7 +19,7 @@ func TestValidLinkIntegration(t *testing.T) {
 		t.Skip("Set LINKSCHKR_TESTS_url=<url to check> to run integration tests")
 	}
 
-	gotSuccess, gotFailures := links.Run(testURL,
+	gotFailures := links.Check(testURL,
 		links.WithRecursive(false),
 		links.WithStdout(io.Discard),
 	)
@@ -27,27 +27,15 @@ func TestValidLinkIntegration(t *testing.T) {
 	if !cmp.Equal(wantFailures, gotFailures) {
 		t.Errorf(cmp.Diff(wantFailures, gotFailures))
 	}
-	wantSuccess := []*links.Result{
-		{
-			URL:          testURL,
-			State:        "up",
-			Error:        nil,
-			ResponseCode: 200,
-		},
-	}
-	if !cmp.Equal(wantSuccess, gotSuccess) {
-		t.Errorf(cmp.Diff(wantSuccess, gotSuccess))
-	}
 }
 
 func TestValidLink(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	gotSuccess, gotFailures := links.Run(ts.URL,
+	gotFailures := links.Check(ts.URL,
 		links.WithHTTPClient(ts.Client()),
 		links.WithStdout(io.Discard),
 	)
@@ -55,26 +43,15 @@ func TestValidLink(t *testing.T) {
 	if !cmp.Equal(wantFailures, gotFailures, cmpopts.EquateErrors()) {
 		t.Errorf(cmp.Diff(wantFailures, gotFailures, cmpopts.EquateErrors()))
 	}
-	wantSuccess := []*links.Result{
-		{
-			URL:          ts.URL,
-			ResponseCode: 200,
-			State:        "up",
-		},
-	}
-	if !cmp.Equal(wantSuccess, gotSuccess) {
-		t.Errorf(cmp.Diff(wantSuccess, gotSuccess))
-	}
 }
 
 func TestNotFoundLink(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusNotFound)
 	}))
 
-	gotSuccess, gotFailures := links.Run(ts.URL,
+	gotFailures := links.Check(ts.URL,
 		links.WithStdout(io.Discard),
 		links.WithHTTPClient(ts.Client()),
 	)
@@ -87,9 +64,5 @@ func TestNotFoundLink(t *testing.T) {
 	}
 	if !cmp.Equal(wantFailures, gotFailures, cmpopts.EquateErrors()) {
 		t.Errorf(cmp.Diff(wantFailures, gotFailures, cmpopts.EquateErrors()))
-	}
-	wantSuccess := []*links.Result{}
-	if !cmp.Equal(wantSuccess, gotSuccess) {
-		t.Errorf(cmp.Diff(wantSuccess, gotSuccess))
 	}
 }

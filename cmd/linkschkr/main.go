@@ -30,7 +30,7 @@ func main() {
 		writer = io.Discard
 	}
 
-	links.Run(*site,
+	links.Check(*site,
 		links.WithDebug(writer),
 		links.WithQuite(*quite),
 		links.WithRate(*intervalSec, *maxTimes, *maxWaitSec),
