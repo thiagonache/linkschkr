@@ -52,14 +52,15 @@ type Limiter struct {
 	Quite      bool
 	Rate       Rate
 	Recursive  bool
-	Result     chan *Result
+	Successes  chan *Result
+	Fails      chan *Result
 	Stdout     io.Writer
 }
 
 type Rate struct {
 	Count    int
 	Interval time.Duration
-	Max      int
+	MaxRun   int
 	MaxWait  time.Duration
 	Start    time.Time
 }
@@ -93,25 +94,31 @@ func (l *Limiter) Start(checked *Checked, counter *Counter) {
 	for {
 		fmt.Fprintf(l.Debug, "[%s] [%s] waiting on ticker channel\n", time.Now().Format(time.RFC3339), "Limiter")
 		<-ticker.C
+		receiveOrDie := time.NewTicker(l.Rate.Interval + l.Rate.MaxWait)
 		fmt.Fprintf(l.Debug, "[%s] [%s] waiting on input channel\n", time.Now().Format(time.RFC3339), "Limiter")
-		site := <-l.Input
-		fmt.Fprintf(l.Debug, "[%s] [%s] got %s\n", time.Now().Format(time.RFC3339), "Limiter", site)
-		fmt.Fprintf(l.Debug, "[%s] [%s] checking if site was already checked\n", time.Now().Format(time.RFC3339), "Limiter")
-		exist := checked.Get(site)
-		for exist {
-			fmt.Fprintf(l.Debug, "[%s] [%s] already checked\n", time.Now().Format(time.RFC3339), "Limiter")
-			fmt.Fprintf(l.Debug, "[%s] [%s] waiting on input channel\n", time.Now().Format(time.RFC3339), "Limiter")
-			site = <-l.Input
+		select {
+		case site := <-l.Input:
 			fmt.Fprintf(l.Debug, "[%s] [%s] got %s\n", time.Now().Format(time.RFC3339), "Limiter", site)
 			fmt.Fprintf(l.Debug, "[%s] [%s] checking if site was already checked\n", time.Now().Format(time.RFC3339), "Limiter")
-			exist = checked.Get(site)
+			exist := checked.Get(site)
+			for exist {
+				fmt.Fprintf(l.Debug, "[%s] [%s] already checked\n", time.Now().Format(time.RFC3339), "Limiter")
+				fmt.Fprintf(l.Debug, "[%s] [%s] waiting on input channel\n", time.Now().Format(time.RFC3339), "Limiter")
+				site = <-l.Input
+				fmt.Fprintf(l.Debug, "[%s] [%s] got %s\n", time.Now().Format(time.RFC3339), "Limiter", site)
+				fmt.Fprintf(l.Debug, "[%s] [%s] checking if site was already checked\n", time.Now().Format(time.RFC3339), "Limiter")
+				exist = checked.Get(site)
+			}
+			fmt.Fprintf(l.Debug, "[%s] [%s] adding %s to sites already checked\n", time.Now().Format(time.RFC3339), "Limiter", site)
+			checked.Add(site)
+			fmt.Fprintf(l.Debug, "[%s] [%s] incrementing running fetchers\n", time.Now().Format(time.RFC3339), "Limiter")
+			counter.Inc()
+			fmt.Fprintf(l.Debug, "[%s] [%s] start fetcher goroutine\n", time.Now().Format(time.RFC3339), "Limiter")
+			go l.Fetcher(site, counter, checked)
+		case <-receiveOrDie.C:
+			l.Quit <- struct{}{}
+			return
 		}
-		fmt.Fprintf(l.Debug, "[%s] [%s] adding %s to sites already checked\n", time.Now().Format(time.RFC3339), "Limiter", site)
-		checked.Add(site)
-		fmt.Fprintf(l.Debug, "[%s] [%s] incrementing running fetchers\n", time.Now().Format(time.RFC3339), "Limiter")
-		counter.Inc()
-		fmt.Fprintf(l.Debug, "[%s] [%s] start fetcher goroutine\n", time.Now().Format(time.RFC3339), "Limiter")
-		go l.Fetcher(site, counter, checked)
 	}
 }
 
@@ -144,20 +151,19 @@ func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 	fmt.Fprintf(l.Stdout, "[%s] [%s] checking site %s\n", time.Now().Format(time.RFC3339), "Fetcher", site)
 	resp, err := l.DoRequest("HEAD", site, client)
 	result := &Result{
-		URL:          site,
-		ResponseCode: resp.StatusCode,
+		URL: site,
 	}
 	if err != nil {
 		result.State = "unkown"
 		result.Error = err
-		l.Result <- result
+		l.Fails <- result
 		l.Quit <- struct{}{}
 		return
 	}
+	result.ResponseCode = resp.StatusCode
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusMethodNotAllowed {
 		result.State = "down"
-		result.Error = fmt.Errorf("unexpected response code %d", resp.StatusCode)
-		l.Result <- result
+		l.Fails <- result
 		if !l.Recursive {
 			l.Quit <- struct{}{}
 		}
@@ -168,7 +174,7 @@ func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 	if !strings.HasPrefix(ct, "text/html") {
 		if !l.Recursive {
 			result.State = "up"
-			l.Result <- result
+			l.Successes <- result
 			l.Quit <- struct{}{}
 		}
 		return
@@ -181,7 +187,7 @@ func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 		result.ResponseCode = resp.StatusCode
 		result.State = "unkown"
 		result.Error = err
-		l.Result <- result
+		l.Fails <- result
 		if !l.Recursive {
 			l.Quit <- struct{}{}
 		}
@@ -190,12 +196,9 @@ func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 	result.ResponseCode = resp.StatusCode
 	fmt.Fprintf(l.Debug, "[%s] [%s] response code %d\n", time.Now().Format(time.RFC3339), "Fetcher", resp.StatusCode)
 	fmt.Fprintf(l.Debug, "[%s] [%s] done\n", time.Now().Format(time.RFC3339), "Fetcher")
-	//fmt.Fprintf(c.Debug, "[%v] [%s] Response code %d\n", time.Now().Format(time.RFC3339), site, resp.StatusCode)
-	//result.StatusCode = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
 		result.State = "down"
-		result.Error = fmt.Errorf("unexpected response code %d", resp.StatusCode)
-		l.Result <- result
+		l.Fails <- result
 		if !l.Recursive {
 			l.Quit <- struct{}{}
 		}
@@ -203,7 +206,7 @@ func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 	}
 
 	result.State = "up"
-	l.Result <- result
+	l.Successes <- result
 	if !l.Recursive {
 		l.Quit <- struct{}{}
 		return
@@ -212,8 +215,6 @@ func (l *Limiter) Fetcher(site string, w *Counter, c *Checked) {
 	for _, s := range extraSites {
 		go l.SendWork(s, c)
 	}
-	//fmt.Fprintf(c.Debug, "[%v] [%s] Extra sites %q\n", time.Now().Format(time.RFC3339), site, extraSites)
-	//result.ExtraSites = append(result.ExtraSites, extraSites...)
 }
 
 func (l *Limiter) ParseHREF(r io.Reader, site string) []string {
@@ -248,45 +249,51 @@ func (l *Limiter) ParseHREF(r io.Reader, site string) []string {
 	return extraURLs
 }
 
-func Run(site string, opts ...Option) {
+func Run(site string, opts ...Option) ([]*Result, []*Result) {
 	l := &Limiter{
 		Debug: io.Discard,
+		Fails: make(chan *Result),
 		Input: make(chan string),
 		Items: map[string]Rate{},
-		Quit:  make(chan struct{}),
 		Quite: false,
 		Rate: Rate{
 			Count:    0,
-			Max:      2,
+			MaxRun:   1,
 			Start:    time.Time{},
-			Interval: 5 * time.Second,
-			MaxWait:  5 * time.Second,
+			Interval: 1 * time.Second,
+			MaxWait:  3 * time.Second,
 		},
 		Recursive: true,
-		Result:    make(chan *Result),
 		Stdout:    os.Stdout,
+		Successes: make(chan *Result),
 	}
 	for _, o := range opts {
 		o(l)
 	}
+	l.Quit = make(chan struct{}, l.Rate.MaxRun)
 	if l.Quite {
 		l.Debug = io.Discard
 		l.Stdout = io.Discard
 	}
-	c := &Checked{
+	checked := &Checked{
 		Items: map[string]struct{}{},
 	}
-	w := &Counter{}
-	for x := 0; x < l.Rate.Max; x++ {
-		go l.Start(c, w)
+	counter := &Counter{}
+	for x := 0; x < l.Rate.MaxRun; x++ {
+		go l.Start(checked, counter)
 	}
-	go l.SendWork(site, c)
+	go l.SendWork(site, checked)
+	responseSuccess, responseFail := []*Result{}, []*Result{}
 	for {
 		select {
-		case r := <-l.Result:
-			fmt.Fprintf(l.Stdout, "[%s] [%s] result => URL: %s State: %s Error: %v\n", time.Now().Format(time.RFC3339), "Run", r.URL, r.State, r.Error)
+		case s := <-l.Successes:
+			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Error: %v\n", time.Now().Format(time.RFC3339), "Run", s.URL, s.State, s.Error)
+			responseSuccess = append(responseSuccess, s)
+		case f := <-l.Fails:
+			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Error: %v\n", time.Now().Format(time.RFC3339), "Run", f.URL, f.State, f.Error)
+			responseFail = append(responseFail, f)
 		case <-l.Quit:
-			return
+			return responseSuccess, responseFail
 		}
 	}
 }
@@ -318,5 +325,16 @@ func WithDebug(w io.Writer) Option {
 func WithQuite(quite bool) Option {
 	return func(l *Limiter) {
 		l.Quite = quite
+	}
+}
+
+func WithRate(intervalSec int, max int, maxWaitSec int) Option {
+	return func(l *Limiter) {
+		l.Rate = Rate{
+			Interval: time.Duration(intervalSec) * time.Second,
+			MaxRun:   max,
+			MaxWait:  time.Duration(maxWaitSec) * time.Second,
+			Start:    time.Time{},
+		}
 	}
 }
