@@ -19,10 +19,15 @@ type Checked struct {
 	Items map[string]struct{}
 }
 
-func (c *Checked) Add(key string) {
+func (c *Checked) ExistOrAdd(key string) bool {
 	c.mu.Lock()
-	c.Items[key] = struct{}{}
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	_, ok := c.Items[key]
+	if !ok {
+		c.Items[key] = struct{}{}
+		return false
+	}
+	return true
 }
 
 func (c *Checked) Get(key string) bool {
@@ -76,19 +81,6 @@ func (l *Limiter) Start(checked *Checked) {
 		select {
 		case site := <-l.Input:
 			fmt.Fprintf(l.Debug, "[%s] [%s] got %s\n", time.Now().UTC().Format(time.RFC3339), "Limiter", site)
-			fmt.Fprintf(l.Debug, "[%s] [%s] checking if site was already checked\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
-			exist := checked.Get(site)
-			for exist {
-				fmt.Fprintf(l.Debug, "[%s] [%s] already checked\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
-				fmt.Fprintf(l.Debug, "[%s] [%s] waiting on input channel\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
-				site = <-l.Input
-				fmt.Fprintf(l.Debug, "[%s] [%s] got %s\n", time.Now().UTC().Format(time.RFC3339), "Limiter", site)
-				fmt.Fprintf(l.Debug, "[%s] [%s] checking if site was already checked\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
-				exist = checked.Get(site)
-			}
-			fmt.Fprintf(l.Debug, "[%s] [%s] adding %s to sites already checked\n", time.Now().UTC().Format(time.RFC3339), "Limiter", site)
-			checked.Add(site)
-			fmt.Fprintf(l.Debug, "[%s] [%s] incrementing running fetchers\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 			fmt.Fprintf(l.Debug, "[%s] [%s] start fetcher goroutine\n", time.Now().UTC().Format(time.RFC3339), "Limiter")
 			go l.Fetcher(site, checked)
 		case <-receiveOrDie.C:
@@ -111,8 +103,9 @@ func (l *Limiter) DoRequest(method, site string, client *http.Client) (*http.Res
 }
 
 func (l *Limiter) SendWork(site string, c *Checked) {
-	exist := c.Get(site)
+	exist := c.ExistOrAdd(site)
 	if !exist {
+		fmt.Fprintf(l.Stdout, "[%s] [%s] %s does not exist in sites already checked\n", time.Now().UTC().Format(time.RFC3339), "Sendwork", site)
 		l.Input <- site
 	}
 }
