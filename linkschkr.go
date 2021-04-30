@@ -14,6 +14,11 @@ import (
 	"github.com/antchfx/htmlquery"
 )
 
+type Work struct {
+	site  string
+	refer string
+}
+
 type Checked struct {
 	mu    sync.Mutex
 	Items map[string]struct{}
@@ -30,22 +35,14 @@ func (c *Checked) ExistOrAdd(key string) bool {
 	return true
 }
 
-func (c *Checked) Get(key string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, ok := c.Items[key]
-	if !ok {
-		return false
-	}
-	return ok
-}
-
 type Result struct {
 	Error        error
 	ResponseCode int
 	State        string
 	URL          string
+	Refer        string
 }
+
 type Option func(*Limiter)
 
 type Limiter struct {
@@ -61,6 +58,7 @@ type Limiter struct {
 	Fails         chan *Result
 	Stdout        io.Writer
 	WaitGroup     sync.WaitGroup
+	Work          Work
 }
 
 type Rate struct {
@@ -83,15 +81,17 @@ func (l *Limiter) DoRequest(method, site string, client *http.Client) (*http.Res
 	return resp, err
 }
 
-func (l *Limiter) Fetch(site string, c *Checked, ticker *time.Ticker) {
+func (l *Limiter) Fetch(work Work, c *Checked, ticker *time.Ticker) {
 	fmt.Fprintf(l.Debug, "[%s] [%s] started\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
 	client := &l.HTTPClient
-	fmt.Fprintf(l.Debug, "[%s] [%s] checking site %s\n", time.Now().UTC().Format(time.RFC3339), "Fetcher", site)
+	fmt.Fprintf(l.Debug, "[%s] [%s] checking site %s\n",
+		time.Now().UTC().Format(time.RFC3339), "Fetcher", work.site)
 	result := &Result{
-		URL: site,
+		URL:   work.site,
+		Refer: work.refer,
 	}
 	<-ticker.C
-	resp, err := l.DoRequest("HEAD", site, client)
+	resp, err := l.DoRequest("HEAD", work.site, client)
 	if err != nil {
 		result.State = "unkown"
 		result.Error = err
@@ -113,7 +113,7 @@ func (l *Limiter) Fetch(site string, c *Checked, ticker *time.Ticker) {
 	}
 
 	fmt.Fprintf(l.Debug, "[%v] [%s] Run GET method\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
-	resp, err = l.DoRequest("GET", site, client)
+	resp, err = l.DoRequest("GET", work.site, client)
 	if err != nil {
 		result.State = "unkown"
 		result.Error = err
@@ -130,12 +130,16 @@ func (l *Limiter) Fetch(site string, c *Checked, ticker *time.Ticker) {
 	}
 
 	if l.Recursive {
-		extraSites := l.ParseHREF(resp.Body, site)
+		extraSites := l.ParseHREF(resp.Body, work.site)
 		for _, s := range extraSites {
 			exist := c.ExistOrAdd(s)
 			if !exist {
+
 				l.WaitGroup.Add(1)
-				go l.Fetch(s, c, ticker)
+				go l.Fetch(Work{
+					site:  s,
+					refer: work.site,
+				}, c, ticker)
 			}
 		}
 	}
@@ -180,11 +184,13 @@ func (l *Limiter) ReadResults() {
 	for {
 		select {
 		case s := <-l.Successes:
-			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Code: %d Error: %v\n", time.Now().UTC().Format(time.RFC3339), "Run", s.URL, s.State, s.ResponseCode, s.Error)
+			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Code: %d Refer: %s Error: %v\n",
+				time.Now().UTC().Format(time.RFC3339), "Run", s.URL, s.State, s.ResponseCode, s.Refer, s.Error)
 			l.ResultSuccess = append(l.ResultSuccess, s)
 			l.WaitGroup.Done()
 		case f := <-l.Fails:
-			fmt.Fprintf(l.Stdout, "[%s] [%s] result => URL: %s State: %s Code: %d Error: %v\n", time.Now().UTC().Format(time.RFC3339), "Run", f.URL, f.State, f.ResponseCode, f.Error)
+			fmt.Fprintf(l.Stdout, "[%s] [%s] result => URL: %s State: %s Code: %d Refer: %s Error: %v\n",
+				time.Now().UTC().Format(time.RFC3339), "Run", f.URL, f.State, f.ResponseCode, f.Refer, f.Error)
 			l.ResultFail = append(l.ResultFail, f)
 			l.WaitGroup.Done()
 		}
@@ -220,7 +226,7 @@ func Check(site string, opts ...Option) []*Result {
 	ticker := time.NewTicker(time.Duration(l.Rate.MaxRun) * l.Rate.Interval)
 	l.WaitGroup.Add(1)
 	checked.ExistOrAdd(site)
-	go l.Fetch(site, checked, ticker)
+	go l.Fetch(Work{site: site}, checked, ticker)
 	l.WaitGroup.Wait()
 
 	return l.ResultFail
