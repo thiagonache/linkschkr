@@ -83,13 +83,14 @@ func (l *Limiter) DoRequest(method, site string, client *http.Client) (*http.Res
 	return resp, err
 }
 
-func (l *Limiter) Fetch(site string, c *Checked) {
+func (l *Limiter) Fetch(site string, c *Checked, ticker *time.Ticker) {
 	fmt.Fprintf(l.Debug, "[%s] [%s] started\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
 	client := &l.HTTPClient
-	fmt.Fprintf(l.Stdout, "[%s] [%s] checking site %s\n", time.Now().UTC().Format(time.RFC3339), "Fetcher", site)
+	fmt.Fprintf(l.Debug, "[%s] [%s] checking site %s\n", time.Now().UTC().Format(time.RFC3339), "Fetcher", site)
 	result := &Result{
 		URL: site,
 	}
+	<-ticker.C
 	resp, err := l.DoRequest("HEAD", site, client)
 	if err != nil {
 		result.State = "unkown"
@@ -134,7 +135,7 @@ func (l *Limiter) Fetch(site string, c *Checked) {
 			exist := c.ExistOrAdd(s)
 			if !exist {
 				l.WaitGroup.Add(1)
-				go l.Fetch(s, c)
+				go l.Fetch(s, c, ticker)
 			}
 		}
 	}
@@ -179,7 +180,7 @@ func (l *Limiter) ReadResults() {
 	for {
 		select {
 		case s := <-l.Successes:
-			fmt.Fprintf(l.Stdout, "[%s] [%s] result => URL: %s State: %s Code: %d Error: %v\n", time.Now().UTC().Format(time.RFC3339), "Run", s.URL, s.State, s.ResponseCode, s.Error)
+			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Code: %d Error: %v\n", time.Now().UTC().Format(time.RFC3339), "Run", s.URL, s.State, s.ResponseCode, s.Error)
 			l.ResultSuccess = append(l.ResultSuccess, s)
 			l.WaitGroup.Done()
 		case f := <-l.Fails:
@@ -216,9 +217,10 @@ func Check(site string, opts ...Option) []*Result {
 	}
 	go l.ReadResults()
 
+	ticker := time.NewTicker(time.Duration(l.Rate.MaxRun) * l.Rate.Interval)
 	l.WaitGroup.Add(1)
 	checked.ExistOrAdd(site)
-	go l.Fetch(site, checked)
+	go l.Fetch(site, checked, ticker)
 	l.WaitGroup.Wait()
 
 	return l.ResultFail
