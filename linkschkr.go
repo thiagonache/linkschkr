@@ -129,16 +129,12 @@ func (l *Links) Fetch(work Work, c *Checked, limiter <-chan struct{}) {
 	}
 
 	if l.Recursive {
-		extraSites := l.ParseHREF(resp.Body, work.site)
+		extraSites := l.ParseBody(resp.Body, work.site)
 		for _, s := range extraSites {
 			exist := c.ExistOrAdd(s)
 			if !exist {
-
 				l.WaitGroup.Add(1)
-				go l.Fetch(Work{
-					site:  s,
-					refer: work.site,
-				}, c, limiter)
+				go l.Fetch(Work{site: s, refer: work.site}, c, limiter)
 			}
 		}
 	}
@@ -147,7 +143,7 @@ func (l *Links) Fetch(work Work, c *Checked, limiter <-chan struct{}) {
 	l.Successes <- result
 }
 
-func (l *Links) ParseHREF(r io.Reader, site string) []string {
+func (l *Links) ParseBody(r io.Reader, site string) []string {
 	extraURLs := []string{}
 	doc, err := htmlquery.Parse(r)
 	if err != nil {
@@ -159,7 +155,7 @@ func (l *Links) ParseHREF(r io.Reader, site string) []string {
 		href := htmlquery.SelectAttr(n, "href")
 		switch {
 		case strings.HasPrefix(href, "//"):
-			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseHREF")
+			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseBody")
 		case strings.HasPrefix(href, "/"):
 			shouldTrim := strings.HasSuffix(href, "/")
 			if shouldTrim {
@@ -171,9 +167,9 @@ func (l *Links) ParseHREF(r io.Reader, site string) []string {
 			baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
 		case strings.HasPrefix(href, "http://"):
-			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseHREF")
+			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseBody")
 		case strings.HasPrefix(href, "https://"):
-			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseHREF")
+			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseBody")
 		}
 	}
 	return extraURLs
