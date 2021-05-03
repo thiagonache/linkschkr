@@ -62,10 +62,8 @@ type Links struct {
 }
 
 type Rate struct {
-	Count    int
 	Interval time.Duration
 	Max      int
-	Start    time.Time
 }
 
 func (l *Links) DoRequest(method, site string, client *http.Client) (*http.Response, error) {
@@ -198,7 +196,7 @@ func Check(site string, opts ...Option) []*Result {
 		ResultFail:    []*Result{},
 		HTTPClient:    http.Client{},
 		Items:         map[string]Rate{},
-		Rate:          Rate{Count: 0, Max: 1, Start: time.Time{}, Interval: 1 * time.Second},
+		Rate:          Rate{Max: 1, Interval: 1 * time.Second},
 		Recursive:     true,
 		ResultSuccess: []*Result{},
 		Successes:     make(chan *Result),
@@ -218,7 +216,7 @@ func Check(site string, opts ...Option) []*Result {
 	}
 	go l.ReadResults()
 
-	limiter := limiter(l.Rate.Interval, l.Rate.Max)
+	limiter := l.Limiter(l.Rate.Interval, l.Rate.Max)
 	l.WaitGroup.Add(1)
 	checked.ExistOrAdd(site)
 	go l.Fetch(Work{site: site}, checked, limiter)
@@ -227,7 +225,7 @@ func Check(site string, opts ...Option) []*Result {
 	return l.ResultFail
 }
 
-func limiter(d time.Duration, n int) <-chan struct{} {
+func (l *Links) Limiter(d time.Duration, n int) <-chan struct{} {
 	limiter := make(chan struct{})
 	go func() {
 		for {
@@ -271,12 +269,11 @@ func WithQuite(quite bool) Option {
 	}
 }
 
-func WithRate(intervalSec int, max int, maxWaitSec int) Option {
+func WithRate(intervalSec int, max int) Option {
 	return func(l *Links) {
 		l.Rate = Rate{
 			Interval: time.Duration(intervalSec) * time.Second,
 			Max:      max,
-			Start:    time.Time{},
 		}
 	}
 }
