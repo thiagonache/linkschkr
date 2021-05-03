@@ -15,8 +15,8 @@ import (
 )
 
 type Work struct {
-	site  string
 	refer string
+	site  string
 }
 
 type Checked struct {
@@ -37,26 +37,26 @@ func (c *Checked) ExistOrAdd(key string) bool {
 
 type Result struct {
 	Error        error
+	Refer        string
 	ResponseCode int
 	State        string
 	URL          string
-	Refer        string
 }
 
-type Option func(*Limiter)
+type Option func(*Links)
 
-type Limiter struct {
+type Links struct {
 	Debug         io.Writer
-	ResultFail    []*Result
+	Fails         chan *Result
 	HTTPClient    http.Client
 	Items         map[string]Rate
 	Quite         bool
 	Rate          Rate
 	Recursive     bool
+	ResultFail    []*Result
 	ResultSuccess []*Result
-	Successes     chan *Result
-	Fails         chan *Result
 	Stdout        io.Writer
+	Successes     chan *Result
 	WaitGroup     sync.WaitGroup
 	Work          Work
 }
@@ -64,12 +64,11 @@ type Limiter struct {
 type Rate struct {
 	Count    int
 	Interval time.Duration
-	MaxRun   int
-	MaxWait  time.Duration
+	Max      int
 	Start    time.Time
 }
 
-func (l *Limiter) DoRequest(method, site string, client *http.Client) (*http.Response, error) {
+func (l *Links) DoRequest(method, site string, client *http.Client) (*http.Response, error) {
 	req, err := http.NewRequest(method, site, nil)
 	if err != nil {
 		return nil, err
@@ -81,8 +80,9 @@ func (l *Limiter) DoRequest(method, site string, client *http.Client) (*http.Res
 	return resp, err
 }
 
-func (l *Limiter) Fetch(work Work, c *Checked, ticker *time.Ticker) {
+func (l *Links) Fetch(work Work, c *Checked, limiter <-chan struct{}) {
 	fmt.Fprintf(l.Debug, "[%s] [%s] started\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
+	<-limiter
 	client := &l.HTTPClient
 	fmt.Fprintf(l.Debug, "[%s] [%s] checking site %s\n",
 		time.Now().UTC().Format(time.RFC3339), "Fetcher", work.site)
@@ -90,7 +90,6 @@ func (l *Limiter) Fetch(work Work, c *Checked, ticker *time.Ticker) {
 		URL:   work.site,
 		Refer: work.refer,
 	}
-	<-ticker.C
 	resp, err := l.DoRequest("HEAD", work.site, client)
 	if err != nil {
 		result.State = "unkown"
@@ -139,7 +138,7 @@ func (l *Limiter) Fetch(work Work, c *Checked, ticker *time.Ticker) {
 				go l.Fetch(Work{
 					site:  s,
 					refer: work.site,
-				}, c, ticker)
+				}, c, limiter)
 			}
 		}
 	}
@@ -148,7 +147,7 @@ func (l *Limiter) Fetch(work Work, c *Checked, ticker *time.Ticker) {
 	l.Successes <- result
 }
 
-func (l *Limiter) ParseHREF(r io.Reader, site string) []string {
+func (l *Links) ParseHREF(r io.Reader, site string) []string {
 	extraURLs := []string{}
 	doc, err := htmlquery.Parse(r)
 	if err != nil {
@@ -180,7 +179,7 @@ func (l *Limiter) ParseHREF(r io.Reader, site string) []string {
 	return extraURLs
 }
 
-func (l *Limiter) ReadResults() {
+func (l *Links) ReadResults() {
 	for {
 		select {
 		case s := <-l.Successes:
@@ -198,12 +197,12 @@ func (l *Limiter) ReadResults() {
 }
 
 func Check(site string, opts ...Option) []*Result {
-	l := &Limiter{
+	l := &Links{
 		Debug:         io.Discard,
 		ResultFail:    []*Result{},
 		HTTPClient:    http.Client{},
 		Items:         map[string]Rate{},
-		Rate:          Rate{Count: 0, MaxRun: 1, Start: time.Time{}, Interval: 1 * time.Second, MaxWait: 3 * time.Second},
+		Rate:          Rate{Count: 0, Max: 1, Start: time.Time{}, Interval: 1 * time.Second},
 		Recursive:     true,
 		ResultSuccess: []*Result{},
 		Successes:     make(chan *Result),
@@ -223,51 +222,64 @@ func Check(site string, opts ...Option) []*Result {
 	}
 	go l.ReadResults()
 
-	ticker := time.NewTicker(time.Duration(l.Rate.MaxRun) * l.Rate.Interval)
+	limiter := limiter(l.Rate.Interval, l.Rate.Max)
 	l.WaitGroup.Add(1)
 	checked.ExistOrAdd(site)
-	go l.Fetch(Work{site: site}, checked, ticker)
+	go l.Fetch(Work{site: site}, checked, limiter)
 	l.WaitGroup.Wait()
 
 	return l.ResultFail
 }
 
+func limiter(d time.Duration, n int) <-chan struct{} {
+	limiter := make(chan struct{})
+	go func() {
+		for {
+			t := time.NewTicker(d)
+			<-t.C
+			for x := 0; x < n; x++ {
+				limiter <- struct{}{}
+			}
+		}
+	}()
+	return limiter
+}
+
 func WithHTTPClient(client *http.Client) Option {
-	return func(l *Limiter) {
+	return func(l *Links) {
 		l.HTTPClient = *client
 	}
 }
 
 func WithRecursive(b bool) Option {
-	return func(l *Limiter) {
+	return func(l *Links) {
 		l.Recursive = b
 	}
 }
 
 func WithStdout(w io.Writer) Option {
-	return func(l *Limiter) {
+	return func(l *Links) {
 		l.Stdout = w
 	}
 }
 
 func WithDebug(w io.Writer) Option {
-	return func(l *Limiter) {
+	return func(l *Links) {
 		l.Debug = w
 	}
 }
 
 func WithQuite(quite bool) Option {
-	return func(l *Limiter) {
+	return func(l *Links) {
 		l.Quite = quite
 	}
 }
 
 func WithRate(intervalSec int, max int, maxWaitSec int) Option {
-	return func(l *Limiter) {
+	return func(l *Links) {
 		l.Rate = Rate{
 			Interval: time.Duration(intervalSec) * time.Second,
-			MaxRun:   max,
-			MaxWait:  time.Duration(maxWaitSec) * time.Second,
+			Max:      max,
 			Start:    time.Time{},
 		}
 	}

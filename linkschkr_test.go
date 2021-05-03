@@ -49,7 +49,6 @@ func TestValidLink(t *testing.T) {
 func TestNotFoundLink(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusNotFound)
 	}))
 
