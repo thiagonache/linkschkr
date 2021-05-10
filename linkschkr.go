@@ -67,6 +67,7 @@ type Rate struct {
 }
 
 func (l *Links) DoRequest(method, site string, client *http.Client) (*http.Response, error) {
+	client.Timeout = l.Rate.Interval + ((l.Rate.Interval * 10) / 100)
 	req, err := http.NewRequest(method, site, nil)
 	if err != nil {
 		return nil, err
@@ -155,12 +156,10 @@ func (l *Links) ParseBody(r io.Reader, site string) []string {
 		case strings.HasPrefix(href, "//"):
 			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseBody")
 		case strings.HasPrefix(href, "/"):
-			shouldTrim := strings.HasSuffix(href, "/")
-			if shouldTrim {
-				href = strings.TrimSuffix(href, "/")
-			}
-			// I'm sure it is a valid URL, there is no reason for parse to fail.
-			// This is why i'm ignoring error returned from Parse
+			href = strings.TrimSuffix(href, "/")
+			// I'm sure it is a valid URL because it was validated before I just
+			// need to parse it again. This is why i'm ignoring error returned
+			// from the url.Parse function
 			u, _ := url.Parse(site)
 			baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
