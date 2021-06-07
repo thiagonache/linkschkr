@@ -192,7 +192,7 @@ func newLinks(site string, opts ...option) (*links, error) {
 		resultSuccess: []*Result{},
 		stdout:        os.Stdout,
 		successes:     make(chan *Result),
-		timeout:       1,
+		timeout:       1 * time.Second,
 	}
 	for _, o := range opts {
 		o(l)
