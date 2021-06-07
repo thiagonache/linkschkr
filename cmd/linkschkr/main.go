@@ -28,12 +28,15 @@ func main() {
 		writer = io.Discard
 	}
 
-	errors := links.Check(*site,
+	_, failures, err := links.Check(*site,
 		links.WithDebug(writer),
 		links.WithQuite(*quite),
 		links.WithRecursive(*recursive),
 	)
-	for _, err := range errors {
-		fmt.Println(err)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, fail := range failures {
+		fmt.Println(fail.URL, fail.ResponseCode)
 	}
 }

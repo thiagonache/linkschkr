@@ -21,7 +21,6 @@ func TestValidLinkIntegration(t *testing.T) {
 	if testURL == "" {
 		t.Skip("Set LINKSCHKR_TESTS_url=<url to check> to run integration tests")
 	}
-
 	gotFailures, _, err := links.Check(testURL,
 		links.WithRecursive(false),
 		links.WithStdout(io.Discard),
@@ -74,8 +73,12 @@ func TestNotFoundLink(t *testing.T) {
 	}
 }
 
-func TestExternalLink(t *testing.T) {
+func TestExternalLinkIntegration(t *testing.T) {
 	t.Parallel()
+	testURL := os.Getenv("LINKSCHKR_TESTS_timeout")
+	if testURL == "" {
+		t.Skip("Set LINKSCHKR_TESTS_timeout=<http request timeout> to run integration tests")
+	}
 	f, err := os.Open("testdata/external_links.html")
 	if err != nil {
 		t.Fatal(err)
@@ -115,13 +118,11 @@ func TestExternalLink(t *testing.T) {
 	if wantLen != len(gotSuccesses) {
 		t.Errorf("want %d items succeed got %d", wantLen, len(gotSuccesses))
 	}
-	wantSuccesses := []*links.Result{
-		{ResponseCode: 200, State: "up", URL: "http://127.0.0.1:8080"},
-		{ResponseCode: 200, State: "up", URL: "https://golang.org"},
-		{ResponseCode: 200, State: "up", URL: "http://www.google.com"},
+	wantSuccesses := map[string]struct{}{"http://127.0.0.1:8080": {}, "https://golang.org": {}, "http://www.google.com": {}}
+	for _, success := range gotSuccesses {
+		_, ok := wantSuccesses[success.URL]
+		if !ok {
+			t.Errorf("Expect %q to exist on %v but not found", success.URL, wantSuccesses)
+		}
 	}
-	if !cmp.Equal(wantSuccesses, gotSuccesses, cmpopts.IgnoreFields(links.Result{}, "refer"), cmp.AllowUnexported(links.Result{})) {
-		t.Errorf(cmp.Diff(wantSuccesses, gotSuccesses, cmpopts.IgnoreFields(links.Result{}, "refer"), cmp.AllowUnexported(links.Result{})))
-	}
-
 }
