@@ -3,7 +3,6 @@ package links
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -49,9 +48,8 @@ type Links struct {
 	Debug         io.Writer
 	Fails         chan *Result
 	HTTPClient    http.Client
-	Items         map[string]Rate
+	Interval      time.Duration
 	Quite         bool
-	Rate          Rate
 	Recursive     bool
 	ResultFail    []*Result
 	ResultSuccess []*Result
@@ -61,13 +59,12 @@ type Links struct {
 	Work          Work
 }
 
-type Rate struct {
-	Interval time.Duration
-	Max      int
+func Logger(w io.Writer, component string, msg string) {
+	fmt.Fprintf(w, "[%s] [%s] %s\n", time.Now().UTC().Format(time.RFC3339), component, msg)
 }
 
 func (l *Links) DoRequest(method, site string, client *http.Client) (*http.Response, error) {
-	client.Timeout = l.Rate.Interval + ((l.Rate.Interval * 10) / 100)
+	client.Timeout = l.Interval + ((l.Interval * 10) / 100)
 	req, err := http.NewRequest(method, site, nil)
 	if err != nil {
 		return nil, err
@@ -79,16 +76,12 @@ func (l *Links) DoRequest(method, site string, client *http.Client) (*http.Respo
 	return resp, err
 }
 
-func (l *Links) Fetch(work Work, c *Checked, limiter <-chan struct{}) {
-	fmt.Fprintf(l.Debug, "[%s] [%s] started\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
-	<-limiter
+func (l *Links) Fetch(work Work, c *Checked, limiter *time.Ticker) {
+	Logger(l.Debug, "Fetcher", "started")
+	<-limiter.C
 	client := &l.HTTPClient
-	fmt.Fprintf(l.Debug, "[%s] [%s] checking site %s\n",
-		time.Now().UTC().Format(time.RFC3339), "Fetcher", work.site)
-	result := &Result{
-		URL:   work.site,
-		Refer: work.refer,
-	}
+	Logger(l.Debug, "Fetcher", fmt.Sprintf("checking site %s", work.site))
+	result := &Result{URL: work.site, Refer: work.refer}
 	resp, err := l.DoRequest("HEAD", work.site, client)
 	if err != nil {
 		result.State = "unkown"
@@ -103,14 +96,13 @@ func (l *Links) Fetch(work Work, c *Checked, limiter <-chan struct{}) {
 		return
 	}
 	ct := resp.Header.Get("Content-Type")
-	fmt.Fprintf(l.Debug, "[%v] [%s] Content type %s\n", time.Now().UTC().Format(time.RFC3339), "Fetcher", ct)
+	Logger(l.Debug, "Fetcher", fmt.Sprintf("Content type %s", ct))
 	if !strings.HasPrefix(ct, "text/html") {
 		result.State = "up"
 		l.Successes <- result
 		return
 	}
-
-	fmt.Fprintf(l.Debug, "[%v] [%s] Run GET method\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
+	Logger(l.Debug, "Fetcher", "Run GET method")
 	resp, err = l.DoRequest("GET", work.site, client)
 	if err != nil {
 		result.State = "unkown"
@@ -119,16 +111,18 @@ func (l *Links) Fetch(work Work, c *Checked, limiter <-chan struct{}) {
 		return
 	}
 	result.ResponseCode = resp.StatusCode
-	fmt.Fprintf(l.Debug, "[%s] [%s] response code %d\n", time.Now().UTC().Format(time.RFC3339), "Fetcher", resp.StatusCode)
-	fmt.Fprintf(l.Debug, "[%s] [%s] done\n", time.Now().UTC().Format(time.RFC3339), "Fetcher")
+	Logger(l.Debug, "Fetcher", fmt.Sprintf("response code %d", resp.StatusCode))
+	Logger(l.Debug, "Fetcher", "done")
 	if resp.StatusCode != http.StatusOK {
 		result.State = "down"
 		l.Fails <- result
 		return
 	}
-
 	if l.Recursive {
-		extraSites := l.ParseBody(resp.Body, work.site)
+		extraSites, err := l.ParseBody(resp.Body, work.site)
+		if err != nil {
+			Logger(l.Stdout, "Fetcher", "error looking for extra sites")
+		}
 		for _, s := range extraSites {
 			exist := c.ExistOrAdd(s)
 			if !exist {
@@ -137,16 +131,15 @@ func (l *Links) Fetch(work Work, c *Checked, limiter <-chan struct{}) {
 			}
 		}
 	}
-
 	result.State = "up"
 	l.Successes <- result
 }
 
-func (l *Links) ParseBody(r io.Reader, site string) []string {
+func (l *Links) ParseBody(r io.Reader, site string) ([]string, error) {
 	extraURLs := []string{}
 	doc, err := htmlquery.Parse(r)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	list := htmlquery.Find(doc, "//a/@href")
 	site = strings.TrimSuffix(site, "/")
@@ -154,7 +147,7 @@ func (l *Links) ParseBody(r io.Reader, site string) []string {
 		href := htmlquery.SelectAttr(n, "href")
 		switch {
 		case strings.HasPrefix(href, "//"):
-			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseBody")
+			Logger(l.Debug, "ParseBody", "not implemented yet")
 		case strings.HasPrefix(href, "/"):
 			href = strings.TrimSuffix(href, "/")
 			// I'm sure it is a valid URL because it was validated before I just
@@ -164,25 +157,23 @@ func (l *Links) ParseBody(r io.Reader, site string) []string {
 			baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
 		case strings.HasPrefix(href, "http://"):
-			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseBody")
+			Logger(l.Debug, "ParseBody", "not implemented yet")
 		case strings.HasPrefix(href, "https://"):
-			fmt.Fprintf(l.Debug, "[%s] [%s] not implemented yet\n", time.Now().UTC().Format(time.RFC3339), "ParseBody")
+			Logger(l.Debug, "ParseBody", "not implemented yet")
 		}
 	}
-	return extraURLs
+	return extraURLs, nil
 }
 
 func (l *Links) ReadResults() {
 	for {
 		select {
 		case s := <-l.Successes:
-			fmt.Fprintf(l.Debug, "[%s] [%s] result => URL: %s State: %s Code: %d Refer: %s Error: %v\n",
-				time.Now().UTC().Format(time.RFC3339), "Run", s.URL, s.State, s.ResponseCode, s.Refer, s.Error)
+			Logger(l.Debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", s.URL, s.State, s.ResponseCode, s.Refer, s.Error))
 			l.ResultSuccess = append(l.ResultSuccess, s)
 			l.WaitGroup.Done()
 		case f := <-l.Fails:
-			fmt.Fprintf(l.Stdout, "[%s] [%s] result => URL: %s State: %s Code: %d Refer: %s Error: %v\n",
-				time.Now().UTC().Format(time.RFC3339), "Run", f.URL, f.State, f.ResponseCode, f.Refer, f.Error)
+			Logger(l.Debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", f.URL, f.State, f.ResponseCode, f.Refer, f.Error))
 			l.ResultFail = append(l.ResultFail, f)
 			l.WaitGroup.Done()
 		}
@@ -192,10 +183,9 @@ func (l *Links) ReadResults() {
 func Check(site string, opts ...Option) []*Result {
 	l := &Links{
 		Debug:         io.Discard,
+		Interval:      1 * time.Second,
 		ResultFail:    []*Result{},
 		HTTPClient:    http.Client{},
-		Items:         map[string]Rate{},
-		Rate:          Rate{Max: 1, Interval: 1 * time.Second},
 		Recursive:     true,
 		ResultSuccess: []*Result{},
 		Successes:     make(chan *Result),
@@ -214,28 +204,13 @@ func Check(site string, opts ...Option) []*Result {
 		Items: map[string]struct{}{},
 	}
 	go l.ReadResults()
-
-	limiter := l.Limiter(l.Rate.Interval, l.Rate.Max)
+	limiter := time.NewTicker(l.Interval)
 	l.WaitGroup.Add(1)
 	checked.ExistOrAdd(site)
 	go l.Fetch(Work{site: site}, checked, limiter)
 	l.WaitGroup.Wait()
 
 	return l.ResultFail
-}
-
-func (l *Links) Limiter(d time.Duration, n int) <-chan struct{} {
-	limiter := make(chan struct{})
-	go func() {
-		for {
-			t := time.NewTicker(d)
-			<-t.C
-			for x := 0; x < n; x++ {
-				limiter <- struct{}{}
-			}
-		}
-	}()
-	return limiter
 }
 
 func WithHTTPClient(client *http.Client) Option {
@@ -265,14 +240,5 @@ func WithDebug(w io.Writer) Option {
 func WithQuite(quite bool) Option {
 	return func(l *Links) {
 		l.Quite = quite
-	}
-}
-
-func WithRate(intervalSec int, max int) Option {
-	return func(l *Links) {
-		l.Rate = Rate{
-			Interval: time.Duration(intervalSec) * time.Second,
-			Max:      max,
-		}
 	}
 }

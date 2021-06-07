@@ -13,8 +13,6 @@ func main() {
 	site := flag.String("site", "", "URL to check links")
 	debug := flag.Bool("debug", false, "Run in debug mode")
 	quite := flag.Bool("quite", false, "Outputs nothing but the final statistics")
-	intervalSec := flag.Int("interval", 3, "Interval that URLs should be checked in seconds")
-	maxTimes := flag.Int("max", 1, "How many times URLs should be checked in interval defined")
 	recursive := flag.Bool("recursive", true, "Run recursively")
 
 	flag.Parse()
@@ -32,7 +30,6 @@ func main() {
 	links.Check(*site,
 		links.WithDebug(writer),
 		links.WithQuite(*quite),
-		links.WithRate(*intervalSec, *maxTimes),
 		links.WithRecursive(*recursive),
 	)
 }
