@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"links"
 	"log"
@@ -27,9 +28,12 @@ func main() {
 		writer = io.Discard
 	}
 
-	links.Check(*site,
+	errors := links.Check(*site,
 		links.WithDebug(writer),
 		links.WithQuite(*quite),
 		links.WithRecursive(*recursive),
 	)
+	for _, err := range errors {
+		fmt.Println(err)
+	}
 }
