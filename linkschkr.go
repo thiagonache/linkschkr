@@ -47,14 +47,17 @@ type option func(*links)
 type links struct {
 	debug         io.Writer
 	fails         chan *Result
+	host          string
 	httpClient    http.Client
 	interval      time.Duration
 	quite         bool
 	recursive     bool
 	resultFail    []*Result
 	resultSuccess []*Result
+	site          string
 	stdout        io.Writer
 	successes     chan *Result
+	timeout       time.Duration
 	waitGroup     sync.WaitGroup
 }
 
@@ -63,7 +66,7 @@ func logger(w io.Writer, component string, msg string) {
 }
 
 func (l *links) doRequest(method, url string, client *http.Client) (*http.Response, error) {
-	client.Timeout = l.interval + ((l.interval * 10) / 100)
+	client.Timeout = l.timeout
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
 		return nil, err
@@ -82,10 +85,11 @@ func (l *links) fetch(wrk work, c *checked, limiter *time.Ticker) {
 	result := &Result{URL: wrk.url, refer: wrk.refer}
 	resp, err := l.doRequest("HEAD", wrk.url, client)
 	if err != nil {
-		result.State, result.ResponseCode, result.err = "unknown", resp.StatusCode, err
+		result.State, result.err = "unknown", err
 		l.fails <- result
 		return
 	}
+	result.ResponseCode = resp.StatusCode
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusMethodNotAllowed {
 		result.State, result.ResponseCode = "down", resp.StatusCode
 		l.fails <- result
@@ -101,10 +105,11 @@ func (l *links) fetch(wrk work, c *checked, limiter *time.Ticker) {
 	logger(l.debug, "Fetcher", "Run GET method")
 	resp, err = l.doRequest("GET", wrk.url, client)
 	if err != nil {
-		result.State, result.ResponseCode, result.err = "unknown", resp.StatusCode, err
+		result.State, result.err = "unknown", err
 		l.fails <- result
 		return
 	}
+	result.ResponseCode = resp.StatusCode
 	logger(l.debug, "Fetcher", fmt.Sprintf("response code %d", resp.StatusCode))
 	logger(l.debug, "Fetcher", "done")
 	if resp.StatusCode != http.StatusOK {
@@ -112,7 +117,8 @@ func (l *links) fetch(wrk work, c *checked, limiter *time.Ticker) {
 		l.fails <- result
 		return
 	}
-	if l.recursive {
+	u, _ := url.Parse(wrk.refer)
+	if l.recursive && u.Host != l.host {
 		extraSites, err := l.parseBody(resp.Body, wrk.url)
 		if err != nil {
 			logger(l.stdout, "Fetcher", "error looking for extra sites")
@@ -129,7 +135,8 @@ func (l *links) fetch(wrk work, c *checked, limiter *time.Ticker) {
 	l.successes <- result
 }
 
-func (l *links) parseBody(r io.Reader, site string) ([]string, error) {
+func (l *links) parseBody(r io.ReadCloser, site string) ([]string, error) {
+	defer r.Close()
 	extraURLs := []string{}
 	doc, err := htmlquery.Parse(r)
 	if err != nil {
@@ -151,9 +158,9 @@ func (l *links) parseBody(r io.Reader, site string) ([]string, error) {
 			baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
 		case strings.HasPrefix(href, "http://"):
-			logger(l.debug, "ParseBody", "not implemented yet")
+			extraURLs = append(extraURLs, href)
 		case strings.HasPrefix(href, "https://"):
-			logger(l.debug, "ParseBody", "not implemented yet")
+			extraURLs = append(extraURLs, href)
 		}
 	}
 	return extraURLs, nil
@@ -174,17 +181,18 @@ func (l *links) readResults() {
 	}
 }
 
-func Check(site string, opts ...option) []*Result {
+func newLinks(site string, opts ...option) (*links, error) {
 	l := &links{
 		debug:         io.Discard,
-		interval:      1 * time.Second,
-		resultFail:    []*Result{},
-		httpClient:    http.Client{},
-		recursive:     true,
-		resultSuccess: []*Result{},
-		successes:     make(chan *Result),
 		fails:         make(chan *Result),
+		httpClient:    http.Client{},
+		interval:      1 * time.Second,
+		recursive:     true,
+		resultFail:    []*Result{},
+		resultSuccess: []*Result{},
 		stdout:        os.Stdout,
+		successes:     make(chan *Result),
+		timeout:       1,
 	}
 	for _, o := range opts {
 		o(l)
@@ -194,17 +202,34 @@ func Check(site string, opts ...option) []*Result {
 		l.debug = io.Discard
 		l.stdout = io.Discard
 	}
+	u, err := url.Parse(site)
+	if err != nil {
+		return nil, err
+	}
+	l.site = site
+	l.host = u.Host
+	return l, nil
+}
+
+func (l *links) run() {
 	chked := &checked{
 		items: map[string]struct{}{},
 	}
 	go l.readResults()
 	limiter := time.NewTicker(l.interval)
 	l.waitGroup.Add(1)
-	chked.existOrAdd(site)
-	go l.fetch(work{url: site}, chked, limiter)
+	chked.existOrAdd(l.site)
+	go l.fetch(work{url: l.site}, chked, limiter)
 	l.waitGroup.Wait()
+}
 
-	return l.resultFail
+func Check(site string, opts ...option) ([]*Result, []*Result, error) {
+	l, err := newLinks(site, opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	l.run()
+	return l.resultFail, l.resultSuccess, nil
 }
 
 func WithHTTPClient(client *http.Client) option {
@@ -234,5 +259,17 @@ func WithDebug(w io.Writer) option {
 func WithQuite(quite bool) option {
 	return func(l *links) {
 		l.quite = quite
+	}
+}
+
+func WithIntervalInMs(n int) option {
+	return func(l *links) {
+		l.interval = time.Duration(n) * time.Millisecond
+	}
+}
+
+func WithTimeoutInMs(n int) option {
+	return func(l *links) {
+		l.timeout = time.Duration(n) * time.Millisecond
 	}
 }
