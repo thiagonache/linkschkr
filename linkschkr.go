@@ -37,9 +37,9 @@ func (c *checked) existOrAdd(key string) bool {
 type Result struct {
 	err          error
 	refer        string
-	responseCode int
-	state        string
-	url          string
+	ResponseCode int
+	State        string
+	URL          string
 }
 
 type option func(*links)
@@ -56,18 +56,6 @@ type links struct {
 	stdout        io.Writer
 	successes     chan *Result
 	waitGroup     sync.WaitGroup
-}
-
-func NewResult(url string, refer string) *Result {
-	return &Result{url: url, refer: refer}
-}
-
-func (n *Result) SetStatus(state string, respCode int) {
-	n.state, n.responseCode = state, respCode
-}
-
-func (n *Result) SetError(err error) {
-	n.err = err
 }
 
 func logger(w io.Writer, component string, msg string) {
@@ -91,38 +79,36 @@ func (l *links) fetch(wrk work, c *checked, limiter *time.Ticker) {
 	<-limiter.C
 	client := &l.httpClient
 	logger(l.debug, "Fetcher", fmt.Sprintf("checking site %s", wrk.url))
-	result := &Result{url: wrk.url, refer: wrk.refer}
+	result := &Result{URL: wrk.url, refer: wrk.refer}
 	resp, err := l.doRequest("HEAD", wrk.url, client)
 	if err != nil {
-		result.SetStatus("unknown", http.StatusInternalServerError)
-		result.SetError(err)
+		result.State, result.ResponseCode, result.err = "unknown", resp.StatusCode, err
 		l.fails <- result
 		return
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusMethodNotAllowed {
-		result.SetStatus("down", resp.StatusCode)
+		result.State, result.ResponseCode = "down", resp.StatusCode
 		l.fails <- result
 		return
 	}
 	ct := resp.Header.Get("Content-Type")
 	logger(l.debug, "Fetcher", fmt.Sprintf("Content type %s", ct))
 	if !strings.HasPrefix(ct, "text/html") {
-		result.SetStatus("up", resp.StatusCode)
+		result.State, result.ResponseCode = "up", resp.StatusCode
 		l.successes <- result
 		return
 	}
 	logger(l.debug, "Fetcher", "Run GET method")
 	resp, err = l.doRequest("GET", wrk.url, client)
 	if err != nil {
-		result.SetStatus("unknown", http.StatusInternalServerError)
-		result.SetError(err)
+		result.State, result.ResponseCode, result.err = "unknown", resp.StatusCode, err
 		l.fails <- result
 		return
 	}
 	logger(l.debug, "Fetcher", fmt.Sprintf("response code %d", resp.StatusCode))
 	logger(l.debug, "Fetcher", "done")
 	if resp.StatusCode != http.StatusOK {
-		result.SetStatus("down", resp.StatusCode)
+		result.State, result.ResponseCode = "down", resp.StatusCode
 		l.fails <- result
 		return
 	}
@@ -139,7 +125,7 @@ func (l *links) fetch(wrk work, c *checked, limiter *time.Ticker) {
 			}
 		}
 	}
-	result.SetStatus("up", resp.StatusCode)
+	result.State, result.ResponseCode = "up", resp.StatusCode
 	l.successes <- result
 }
 
@@ -177,11 +163,11 @@ func (l *links) readResults() {
 	for {
 		select {
 		case s := <-l.successes:
-			logger(l.debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", s.url, s.state, s.responseCode, s.refer, s.err))
+			logger(l.debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", s.URL, s.State, s.ResponseCode, s.refer, s.err))
 			l.resultSuccess = append(l.resultSuccess, s)
 			l.waitGroup.Done()
 		case f := <-l.fails:
-			logger(l.debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", f.url, f.state, f.responseCode, f.refer, f.err))
+			logger(l.debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", f.URL, f.State, f.ResponseCode, f.refer, f.err))
 			l.resultFail = append(l.resultFail, f)
 			l.waitGroup.Done()
 		}

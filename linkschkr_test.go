@@ -56,10 +56,7 @@ func TestNotFoundLink(t *testing.T) {
 		links.WithStdout(io.Discard),
 		links.WithHTTPClient(ts.Client()),
 	)
-	result := links.NewResult(ts.URL, "")
-	result.SetStatus("down", http.StatusNotFound)
-	wantFailures := []*links.Result{result}
-
+	wantFailures := []*links.Result{{URL: ts.URL, State: "down", ResponseCode: http.StatusNotFound}}
 	if !cmp.Equal(wantFailures, gotFailures, cmpopts.EquateErrors(), cmp.AllowUnexported(links.Result{})) {
 		t.Errorf(cmp.Diff(wantFailures, gotFailures, cmpopts.EquateErrors(), cmp.AllowUnexported(links.Result{})))
 	}
