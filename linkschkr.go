@@ -26,7 +26,7 @@ type Checked struct {
 	Items map[string]struct{}
 }
 
-func (c *Checked) ExistOrAdd(key string) bool {
+func (c *Checked) existOrAdd(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	_, ok := c.Items[key]
@@ -45,28 +45,27 @@ type Result struct {
 	URL          string
 }
 
-type Option func(*Links)
+type option func(*links)
 
-type Links struct {
-	Debug      io.Writer
-	HTTPClient http.Client
-	Interval   time.Duration
-	Quite      bool
-	Recursive  bool
-	Responses  []*Result
-	Results    chan *Result
+type links struct {
+	debug      io.Writer
+	httpClient http.Client
+	interval   time.Duration
+	quite      bool
+	recursive  bool
+	responses  []*Result
+	results    chan *Result
 	stats      stats
-	Stdout     io.Writer
-	WaitGroup  sync.WaitGroup
-	Work       Work
+	stdout     io.Writer
+	wg         sync.WaitGroup
 }
 
 func Logger(w io.Writer, component string, msg string) {
 	fmt.Fprintf(w, "[%s] [%s] %s\n", time.Now().UTC().Format(time.RFC3339), component, msg)
 }
 
-func (l *Links) DoRequest(method, site string, client *http.Client) (*http.Response, error) {
-	client.Timeout = l.Interval * 2
+func (l *links) doRequest(method, site string, client *http.Client) (*http.Response, error) {
+	client.Timeout = l.interval * 2
 	req, err := http.NewRequest(method, site, nil)
 	if err != nil {
 		return nil, err
@@ -78,61 +77,61 @@ func (l *Links) DoRequest(method, site string, client *http.Client) (*http.Respo
 	return resp, err
 }
 
-func (l *Links) Fetch(work Work, c *Checked, limiter *time.Ticker) {
-	Logger(l.Debug, "Fetcher", "started")
+func (l *links) fetch(work Work, c *Checked, limiter *time.Ticker) {
+	Logger(l.debug, "Fetcher", "started")
 	<-limiter.C
-	client := &l.HTTPClient
-	Logger(l.Debug, "Fetcher", fmt.Sprintf("checking site %s", work.site))
+	client := &l.httpClient
+	Logger(l.debug, "Fetcher", fmt.Sprintf("checking site %s", work.site))
 	result := &Result{URL: work.site, Refer: work.refer}
-	resp, err := l.DoRequest("HEAD", work.site, client)
+	resp, err := l.doRequest("HEAD", work.site, client)
 	if err != nil {
 		result.Error = err
-		l.Results <- result
+		l.results <- result
 		return
 	}
 	result.ResponseCode = resp.StatusCode
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusMethodNotAllowed {
-		l.Results <- result
+		l.results <- result
 		return
 	}
 	ct := resp.Header.Get("Content-Type")
-	Logger(l.Debug, "Fetcher", fmt.Sprintf("Content type %s", ct))
+	Logger(l.debug, "Fetcher", fmt.Sprintf("Content type %s", ct))
 	if !strings.HasPrefix(ct, "text/html") {
-		l.Results <- result
+		l.results <- result
 		return
 	}
-	Logger(l.Debug, "Fetcher", "Run GET method")
-	resp, err = l.DoRequest("GET", work.site, client)
+	Logger(l.debug, "Fetcher", "Run GET method")
+	resp, err = l.doRequest("GET", work.site, client)
 	if err != nil {
 		result.Error = err
-		l.Results <- result
+		l.results <- result
 		return
 	}
 	result.ResponseCode = resp.StatusCode
-	Logger(l.Debug, "Fetcher", fmt.Sprintf("response code %d", resp.StatusCode))
+	Logger(l.debug, "Fetcher", fmt.Sprintf("response code %d", resp.StatusCode))
 	if resp.StatusCode != http.StatusOK {
-		l.Results <- result
+		l.results <- result
 		return
 	}
-	if l.Recursive {
+	if l.recursive {
 		extraSites, err := l.ParseBody(resp.Body, work.site)
 		if err != nil {
-			Logger(l.Stdout, "Fetcher", "error looking for extra sites")
+			Logger(l.stdout, "Fetcher", "error looking for extra sites")
 		}
 		for _, s := range extraSites {
-			exist := c.ExistOrAdd(s)
+			exist := c.existOrAdd(s)
 			if !exist {
-				l.WaitGroup.Add(1)
-				go l.Fetch(Work{site: s, refer: work.site}, c, limiter)
+				l.wg.Add(1)
+				go l.fetch(Work{site: s, refer: work.site}, c, limiter)
 			}
 		}
 	}
 	result.State = "up"
-	l.Results <- result
-	Logger(l.Debug, "Fetcher", "done")
+	l.results <- result
+	Logger(l.debug, "Fetcher", "done")
 }
 
-func (l *Links) ParseBody(r io.Reader, site string) ([]string, error) {
+func (l *links) ParseBody(r io.Reader, site string) ([]string, error) {
 	extraURLs := []string{}
 	doc, err := htmlquery.Parse(r)
 	if err != nil {
@@ -144,28 +143,28 @@ func (l *Links) ParseBody(r io.Reader, site string) ([]string, error) {
 		href := htmlquery.SelectAttr(n, "href")
 		switch {
 		case strings.HasPrefix(href, "//"):
-			Logger(l.Debug, "ParseBody", "not implemented yet")
+			Logger(l.debug, "ParseBody", "not implemented yet")
 		case strings.HasPrefix(href, "/"):
 			href = strings.TrimSuffix(href, "/")
 			u, err := url.Parse(site)
 			if err != nil {
-				Logger(l.Stdout, "ParseBody", fmt.Sprintf("cannot parse url %q", site))
+				Logger(l.stdout, "ParseBody", fmt.Sprintf("cannot parse url %q", site))
 				continue
 			}
 			baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
 		case strings.HasPrefix(href, "http://"):
-			Logger(l.Debug, "ParseBody", "not implemented yet")
+			Logger(l.debug, "ParseBody", "not implemented yet")
 		case strings.HasPrefix(href, "https://"):
-			Logger(l.Debug, "ParseBody", "not implemented yet")
+			Logger(l.debug, "ParseBody", "not implemented yet")
 		}
 	}
 	return extraURLs, nil
 }
 
-func (l *Links) failures() []*Result {
+func (l *links) failures() []*Result {
 	resp := []*Result{}
-	for _, r := range l.Responses {
+	for _, r := range l.responses {
 		if r.ResponseCode != http.StatusOK {
 			resp = append(resp, r)
 		}
@@ -173,70 +172,70 @@ func (l *Links) failures() []*Result {
 	return resp
 }
 
-func (l *Links) ReadResults() {
-	for r := range l.Results {
+func (l *links) readResults() {
+	for r := range l.results {
 		l.stats.total += 1
 		r.State = "up"
 		if r.ResponseCode != http.StatusOK {
 			r.State = "down"
 		}
-		Logger(l.Debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", r.URL, r.State, r.ResponseCode, r.Refer, r.Error))
-		l.Responses = append(l.Responses, r)
-		l.WaitGroup.Done()
+		Logger(l.debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", r.URL, r.State, r.ResponseCode, r.Refer, r.Error))
+		l.responses = append(l.responses, r)
+		l.wg.Done()
 	}
 }
 
-func Check(site string, opts ...Option) []*Result {
-	l := &Links{
-		Debug:      io.Discard,
-		HTTPClient: http.Client{},
-		Interval:   1 * time.Second,
-		Recursive:  true,
-		Responses:  []*Result{},
-		Results:    make(chan *Result),
-		Stdout:     os.Stdout,
+func Check(site string, opts ...option) []*Result {
+	l := &links{
+		debug:      io.Discard,
+		httpClient: http.Client{},
+		interval:   1 * time.Second,
+		recursive:  true,
+		responses:  []*Result{},
+		results:    make(chan *Result),
+		stdout:     os.Stdout,
 	}
 	for _, o := range opts {
 		o(l)
 	}
 
-	if l.Quite {
-		l.Debug = io.Discard
-		l.Stdout = io.Discard
+	if l.quite {
+		l.debug = io.Discard
+		l.stdout = io.Discard
 	}
 	checked := &Checked{
 		Items: map[string]struct{}{},
 	}
-	go l.ReadResults()
-	limiter := time.NewTicker(l.Interval)
-	l.WaitGroup.Add(1)
-	checked.ExistOrAdd(site)
-	go l.Fetch(Work{site: site}, checked, limiter)
-	l.WaitGroup.Wait()
-	Logger(l.Stdout, "Checker", fmt.Sprintf("total checks performed is %d", l.stats.total))
+	go l.readResults()
+	limiter := time.NewTicker(l.interval)
+	l.wg.Add(1)
+	checked.existOrAdd(site)
+	go l.fetch(Work{site: site}, checked, limiter)
+	l.wg.Wait()
+	Logger(l.stdout, "Checker", fmt.Sprintf("total checks performed is %d", l.stats.total))
 	return l.failures()
 }
 
-func WithHTTPClient(client *http.Client) Option {
-	return func(l *Links) { l.HTTPClient = *client }
+func WithHTTPClient(client *http.Client) option {
+	return func(l *links) { l.httpClient = *client }
 }
 
-func WithNoRecursion(b bool) Option {
-	return func(l *Links) { l.Recursive = !b }
+func WithNoRecursion(b bool) option {
+	return func(l *links) { l.recursive = !b }
 }
 
-func WithStdout(w io.Writer) Option {
-	return func(l *Links) { l.Stdout = w }
+func WithStdout(w io.Writer) option {
+	return func(l *links) { l.stdout = w }
 }
 
-func WithDebug(w io.Writer) Option {
-	return func(l *Links) { l.Debug = w }
+func WithDebug(w io.Writer) option {
+	return func(l *links) { l.debug = w }
 }
 
-func WithQuite(quite bool) Option {
-	return func(l *Links) { l.Quite = quite }
+func WithQuite(quite bool) option {
+	return func(l *links) { l.quite = quite }
 }
 
-func WithIntervalInMs(n int) Option {
-	return func(l *Links) { l.Interval = time.Duration(n) * time.Millisecond }
+func WithIntervalInMs(n int) option {
+	return func(l *links) { l.interval = time.Duration(n) * time.Millisecond }
 }
