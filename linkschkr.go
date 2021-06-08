@@ -45,18 +45,16 @@ type Result struct {
 type Option func(*Links)
 
 type Links struct {
-	Debug         io.Writer
-	Fails         chan *Result
-	HTTPClient    http.Client
-	Interval      time.Duration
-	Quite         bool
-	Recursive     bool
-	ResultFail    []*Result
-	ResultSuccess []*Result
-	Stdout        io.Writer
-	Successes     chan *Result
-	WaitGroup     sync.WaitGroup
-	Work          Work
+	Debug      io.Writer
+	HTTPClient http.Client
+	Interval   time.Duration
+	Quite      bool
+	Recursive  bool
+	Responses  []*Result
+	Results    chan *Result
+	Stdout     io.Writer
+	WaitGroup  sync.WaitGroup
+	Work       Work
 }
 
 func Logger(w io.Writer, component string, msg string) {
@@ -86,20 +84,20 @@ func (l *Links) Fetch(work Work, c *Checked, limiter *time.Ticker) {
 	if err != nil {
 		result.State = "unkown"
 		result.Error = err
-		l.Fails <- result
+		l.Results <- result
 		return
 	}
 	result.ResponseCode = resp.StatusCode
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusMethodNotAllowed {
 		result.State = "down"
-		l.Fails <- result
+		l.Results <- result
 		return
 	}
 	ct := resp.Header.Get("Content-Type")
 	Logger(l.Debug, "Fetcher", fmt.Sprintf("Content type %s", ct))
 	if !strings.HasPrefix(ct, "text/html") {
 		result.State = "up"
-		l.Successes <- result
+		l.Results <- result
 		return
 	}
 	Logger(l.Debug, "Fetcher", "Run GET method")
@@ -107,7 +105,7 @@ func (l *Links) Fetch(work Work, c *Checked, limiter *time.Ticker) {
 	if err != nil {
 		result.State = "unkown"
 		result.Error = err
-		l.Fails <- result
+		l.Results <- result
 		return
 	}
 	result.ResponseCode = resp.StatusCode
@@ -115,7 +113,7 @@ func (l *Links) Fetch(work Work, c *Checked, limiter *time.Ticker) {
 	Logger(l.Debug, "Fetcher", "done")
 	if resp.StatusCode != http.StatusOK {
 		result.State = "down"
-		l.Fails <- result
+		l.Results <- result
 		return
 	}
 	if l.Recursive {
@@ -132,7 +130,7 @@ func (l *Links) Fetch(work Work, c *Checked, limiter *time.Ticker) {
 		}
 	}
 	result.State = "up"
-	l.Successes <- result
+	l.Results <- result
 }
 
 func (l *Links) ParseBody(r io.Reader, site string) ([]string, error) {
@@ -165,32 +163,37 @@ func (l *Links) ParseBody(r io.Reader, site string) ([]string, error) {
 	return extraURLs, nil
 }
 
-func (l *Links) ReadResults() {
-	for {
-		select {
-		case s := <-l.Successes:
-			Logger(l.Debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", s.URL, s.State, s.ResponseCode, s.Refer, s.Error))
-			l.ResultSuccess = append(l.ResultSuccess, s)
-			l.WaitGroup.Done()
-		case f := <-l.Fails:
-			Logger(l.Debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", f.URL, f.State, f.ResponseCode, f.Refer, f.Error))
-			l.ResultFail = append(l.ResultFail, f)
-			l.WaitGroup.Done()
+func (l *Links) failures() []*Result {
+	resp := []*Result{}
+	for _, r := range l.Responses {
+		if r.ResponseCode != http.StatusOK {
+			resp = append(resp, r)
 		}
+	}
+	return resp
+}
+
+func (l *Links) ReadResults() {
+	for r := range l.Results {
+		r.State = "up"
+		if r.ResponseCode != http.StatusOK {
+			r.State = "down"
+		}
+		Logger(l.Debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", r.URL, r.State, r.ResponseCode, r.Refer, r.Error))
+		l.Responses = append(l.Responses, r)
+		l.WaitGroup.Done()
 	}
 }
 
 func Check(site string, opts ...Option) []*Result {
 	l := &Links{
-		Debug:         io.Discard,
-		Interval:      1 * time.Second,
-		ResultFail:    []*Result{},
-		HTTPClient:    http.Client{},
-		Recursive:     true,
-		ResultSuccess: []*Result{},
-		Successes:     make(chan *Result),
-		Fails:         make(chan *Result),
-		Stdout:        os.Stdout,
+		Debug:      io.Discard,
+		HTTPClient: http.Client{},
+		Interval:   1 * time.Second,
+		Recursive:  true,
+		Responses:  []*Result{},
+		Results:    make(chan *Result),
+		Stdout:     os.Stdout,
 	}
 	for _, o := range opts {
 		o(l)
@@ -209,8 +212,7 @@ func Check(site string, opts ...Option) []*Result {
 	checked.ExistOrAdd(site)
 	go l.Fetch(Work{site: site}, checked, limiter)
 	l.WaitGroup.Wait()
-
-	return l.ResultFail
+	return l.failures()
 }
 
 func WithHTTPClient(client *http.Client) Option {
