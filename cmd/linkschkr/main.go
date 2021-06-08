@@ -14,7 +14,7 @@ func main() {
 	debug := flag.Bool("debug", false, "Run in debug mode")
 	quite := flag.Bool("quite", false, "Outputs nothing but the final statistics")
 	noRecursion := flag.Bool("no-recursion", false, "Does not run recursively")
-	interval := flag.Int("interval", 1, "Interval between each check in milliseconds")
+	interval := flag.Int("interval", 1000, "Interval between each check in milliseconds")
 	flag.Parse()
 	if *site == "" {
 		log.Fatal("Missing -site argument")
