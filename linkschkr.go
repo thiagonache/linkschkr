@@ -190,7 +190,7 @@ func Check(site string, opts ...Option) []*Result {
 	l := &Links{
 		Debug:      io.Discard,
 		HTTPClient: http.Client{},
-		Interval:   2 * time.Second,
+		Interval:   1 * time.Second,
 		Recursive:  true,
 		Responses:  []*Result{},
 		Results:    make(chan *Result),
