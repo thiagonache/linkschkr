@@ -90,14 +90,13 @@ func TestCheckBrokenLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error reading file: %v", err)
 	}
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, string(content))
 	}))
 
 	gotFailures, err := links.Check(ts.URL,
-		links.WithHTTPClient(ts.Client()),
 		links.WithStdout(io.Discard),
 		links.WithIntervalInMs(500),
 	)

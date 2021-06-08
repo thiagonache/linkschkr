@@ -70,7 +70,7 @@ func Check(site string, opts ...option) ([]*Result, error) {
 	l := &links{
 		debug:      io.Discard,
 		httpClient: http.Client{},
-		interval:   1 * time.Second,
+		interval:   2 * time.Second,
 		recursive:  true,
 		responses:  []*Result{},
 		results:    make(chan *Result),
@@ -102,7 +102,7 @@ func Check(site string, opts ...option) ([]*Result, error) {
 }
 
 func (l *links) doRequest(method, site string, client *http.Client) (*http.Response, error) {
-	client.Timeout = l.interval * 2
+	client.Timeout = l.interval
 	req, err := http.NewRequest(method, site, nil)
 	if err != nil {
 		return nil, err
