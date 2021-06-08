@@ -13,7 +13,7 @@ import (
 	"github.com/antchfx/htmlquery"
 )
 
-type Work struct {
+type work struct {
 	refer string
 	site  string
 }
@@ -21,12 +21,12 @@ type Work struct {
 type stats struct {
 	total int
 }
-type Checked struct {
+type checked struct {
 	mu    sync.Mutex
 	Items map[string]struct{}
 }
 
-func (c *Checked) existOrAdd(key string) bool {
+func (c *checked) existOrAdd(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	_, ok := c.Items[key]
@@ -88,14 +88,14 @@ func Check(site string, opts ...option) ([]*Result, error) {
 		l.debug = io.Discard
 		l.stdout = io.Discard
 	}
-	checked := &Checked{
+	chked := &checked{
 		Items: map[string]struct{}{},
 	}
 	go l.readResults()
 	limiter := time.NewTicker(l.interval)
 	l.wg.Add(1)
-	checked.existOrAdd(site)
-	go l.fetch(Work{site: site}, checked, limiter)
+	chked.existOrAdd(site)
+	go l.fetch(work{site: site}, chked, limiter)
 	l.wg.Wait()
 	Logger(l.stdout, "Checker", fmt.Sprintf("total checks performed is %d", l.stats.total))
 	return l.failures(), nil
@@ -114,13 +114,13 @@ func (l *links) doRequest(method, site string, client *http.Client) (*http.Respo
 	return resp, err
 }
 
-func (l *links) fetch(work Work, c *Checked, limiter *time.Ticker) {
+func (l *links) fetch(wrk work, c *checked, limiter *time.Ticker) {
 	Logger(l.debug, "Fetcher", "started")
 	<-limiter.C
 	client := &l.httpClient
-	Logger(l.debug, "Fetcher", fmt.Sprintf("checking site %s", work.site))
-	result := &Result{URL: work.site, Refer: work.refer}
-	resp, err := l.doRequest("HEAD", work.site, client)
+	Logger(l.debug, "Fetcher", fmt.Sprintf("checking site %s", wrk.site))
+	result := &Result{URL: wrk.site, Refer: wrk.refer}
+	resp, err := l.doRequest("HEAD", wrk.site, client)
 	if err != nil {
 		result.Error = err
 		l.results <- result
@@ -138,7 +138,7 @@ func (l *links) fetch(work Work, c *Checked, limiter *time.Ticker) {
 		return
 	}
 	Logger(l.debug, "Fetcher", "Run GET method")
-	resp, err = l.doRequest("GET", work.site, client)
+	resp, err = l.doRequest("GET", wrk.site, client)
 	if err != nil {
 		result.Error = err
 		l.results <- result
@@ -151,7 +151,7 @@ func (l *links) fetch(work Work, c *Checked, limiter *time.Ticker) {
 		return
 	}
 	if l.recursive {
-		extraSites, err := l.parseBody(resp.Body, work.site)
+		extraSites, err := l.parseBody(resp.Body, wrk.site)
 		if err != nil {
 			Logger(l.stdout, "Fetcher", "error looking for extra sites")
 		}
@@ -159,7 +159,7 @@ func (l *links) fetch(work Work, c *Checked, limiter *time.Ticker) {
 			exist := c.existOrAdd(s)
 			if !exist {
 				l.wg.Add(1)
-				go l.fetch(Work{site: s, refer: work.site}, c, limiter)
+				go l.fetch(work{site: s, refer: wrk.site}, c, limiter)
 			}
 		}
 	}
