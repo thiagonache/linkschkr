@@ -82,37 +82,31 @@ func (l *Links) Fetch(work Work, c *Checked, limiter *time.Ticker) {
 	result := &Result{URL: work.site, Refer: work.refer}
 	resp, err := l.DoRequest("HEAD", work.site, client)
 	if err != nil {
-		result.State = "unkown"
 		result.Error = err
 		l.Results <- result
 		return
 	}
 	result.ResponseCode = resp.StatusCode
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusMethodNotAllowed {
-		result.State = "down"
 		l.Results <- result
 		return
 	}
 	ct := resp.Header.Get("Content-Type")
 	Logger(l.Debug, "Fetcher", fmt.Sprintf("Content type %s", ct))
 	if !strings.HasPrefix(ct, "text/html") {
-		result.State = "up"
 		l.Results <- result
 		return
 	}
 	Logger(l.Debug, "Fetcher", "Run GET method")
 	resp, err = l.DoRequest("GET", work.site, client)
 	if err != nil {
-		result.State = "unkown"
 		result.Error = err
 		l.Results <- result
 		return
 	}
 	result.ResponseCode = resp.StatusCode
 	Logger(l.Debug, "Fetcher", fmt.Sprintf("response code %d", resp.StatusCode))
-	Logger(l.Debug, "Fetcher", "done")
 	if resp.StatusCode != http.StatusOK {
-		result.State = "down"
 		l.Results <- result
 		return
 	}
@@ -131,6 +125,7 @@ func (l *Links) Fetch(work Work, c *Checked, limiter *time.Ticker) {
 	}
 	result.State = "up"
 	l.Results <- result
+	Logger(l.Debug, "Fetcher", "done")
 }
 
 func (l *Links) ParseBody(r io.Reader, site string) ([]string, error) {
