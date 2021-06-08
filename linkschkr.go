@@ -147,10 +147,11 @@ func (l *Links) ParseBody(r io.Reader, site string) ([]string, error) {
 			Logger(l.Debug, "ParseBody", "not implemented yet")
 		case strings.HasPrefix(href, "/"):
 			href = strings.TrimSuffix(href, "/")
-			// I'm sure it is a valid URL because it was validated before I just
-			// need to parse it again. This is why i'm ignoring error returned
-			// from the url.Parse function
-			u, _ := url.Parse(site)
+			u, err := url.Parse(site)
+			if err != nil {
+				Logger(l.Stdout, "ParseBody", fmt.Sprintf("cannot parse url %q", site))
+				continue
+			}
 			baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
 		case strings.HasPrefix(href, "http://"):
