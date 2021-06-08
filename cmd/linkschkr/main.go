@@ -14,7 +14,6 @@ func main() {
 	debug := flag.Bool("debug", false, "Run in debug mode")
 	quite := flag.Bool("quite", false, "Outputs nothing but the final statistics")
 	noRecursion := flag.Bool("no-recursion", false, "Does not run recursively")
-
 	flag.Parse()
 	if *site == "" {
 		log.Fatal("Missing -site argument")
@@ -26,14 +25,13 @@ func main() {
 	if *quite {
 		writer = io.Discard
 	}
-
 	failures := links.Check(*site,
 		links.WithDebug(writer),
 		links.WithQuite(*quite),
 		links.WithNoRecursion(*noRecursion),
 	)
-	fmt.Println("Failures:")
+	links.Logger(os.Stdout, "main", "Failures:")
 	for _, fail := range failures {
-		fmt.Printf("URL: %q, State: %q, Err: %v\n", fail.URL, fail.State, fail.Error)
+		links.Logger(os.Stdout, "main", fmt.Sprintf("URL: %q Response: %d State: %q Err: %v Refer: %q\n", fail.URL, fail.ResponseCode, fail.State, fail.Error, fail.Refer))
 	}
 }

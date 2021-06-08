@@ -18,6 +18,9 @@ type Work struct {
 	site  string
 }
 
+type stats struct {
+	total int
+}
 type Checked struct {
 	mu    sync.Mutex
 	Items map[string]struct{}
@@ -52,6 +55,7 @@ type Links struct {
 	Recursive  bool
 	Responses  []*Result
 	Results    chan *Result
+	stats      stats
 	Stdout     io.Writer
 	WaitGroup  sync.WaitGroup
 	Work       Work
@@ -170,6 +174,7 @@ func (l *Links) failures() []*Result {
 
 func (l *Links) ReadResults() {
 	for r := range l.Results {
+		l.stats.total += 1
 		r.State = "up"
 		if r.ResponseCode != http.StatusOK {
 			r.State = "down"
@@ -184,7 +189,7 @@ func Check(site string, opts ...Option) []*Result {
 	l := &Links{
 		Debug:      io.Discard,
 		HTTPClient: http.Client{},
-		Interval:   1 * time.Second,
+		Interval:   2 * time.Second,
 		Recursive:  true,
 		Responses:  []*Result{},
 		Results:    make(chan *Result),
@@ -207,35 +212,30 @@ func Check(site string, opts ...Option) []*Result {
 	checked.ExistOrAdd(site)
 	go l.Fetch(Work{site: site}, checked, limiter)
 	l.WaitGroup.Wait()
+	Logger(l.Stdout, "Checker", fmt.Sprintf("total checks performed is %d", l.stats.total))
 	return l.failures()
 }
 
 func WithHTTPClient(client *http.Client) Option {
-	return func(l *Links) {
-		l.HTTPClient = *client
-	}
+	return func(l *Links) { l.HTTPClient = *client }
 }
 
 func WithNoRecursion(b bool) Option {
-	return func(l *Links) {
-		l.Recursive = !b
-	}
+	return func(l *Links) { l.Recursive = !b }
 }
 
 func WithStdout(w io.Writer) Option {
-	return func(l *Links) {
-		l.Stdout = w
-	}
+	return func(l *Links) { l.Stdout = w }
 }
 
 func WithDebug(w io.Writer) Option {
-	return func(l *Links) {
-		l.Debug = w
-	}
+	return func(l *Links) { l.Debug = w }
 }
 
 func WithQuite(quite bool) Option {
-	return func(l *Links) {
-		l.Quite = quite
-	}
+	return func(l *Links) { l.Quite = quite }
+}
+
+func WithIntervalInMs(n int) Option {
+	return func(l *Links) { l.Interval = time.Duration(n) * time.Millisecond }
 }

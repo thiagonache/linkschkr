@@ -39,6 +39,7 @@ func TestValidLink(t *testing.T) {
 	gotFailures := links.Check(ts.URL,
 		links.WithHTTPClient(ts.Client()),
 		links.WithStdout(io.Discard),
+		links.WithIntervalInMs(500),
 	)
 	wantFailures := []*links.Result{}
 	if !cmp.Equal(wantFailures, gotFailures, cmpopts.EquateErrors()) {
@@ -55,6 +56,7 @@ func TestNotFoundLink(t *testing.T) {
 	gotFailures := links.Check(ts.URL,
 		links.WithStdout(io.Discard),
 		links.WithHTTPClient(ts.Client()),
+		links.WithIntervalInMs(500),
 	)
 	wantFailures := []*links.Result{
 		{
