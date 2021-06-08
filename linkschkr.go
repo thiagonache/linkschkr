@@ -150,7 +150,9 @@ func (l *links) fetch(wrk work, c *checked, limiter *time.Ticker) {
 		l.results <- result
 		return
 	}
-	if l.recursive {
+	// wrk.site is a already fetched url, so i'm sure it won't error
+	u, _ := url.Parse(wrk.site)
+	if l.recursive && u.Host == l.domain {
 		extraSites, err := l.parseBody(resp.Body, wrk.site)
 		if err != nil {
 			Logger(l.stdout, "Fetcher", "error looking for extra sites")
@@ -184,9 +186,9 @@ func (l *links) parseBody(r io.Reader, site string) ([]string, error) {
 			baseURL := fmt.Sprintf("%s://%s", l.scheme, l.domain)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
 		case strings.HasPrefix(href, "http://"):
-			Logger(l.debug, "ParseBody", "not implemented yet")
+			extraURLs = append(extraURLs, href)
 		case strings.HasPrefix(href, "https://"):
-			Logger(l.debug, "ParseBody", "not implemented yet")
+			extraURLs = append(extraURLs, href)
 		}
 	}
 	return extraURLs, nil

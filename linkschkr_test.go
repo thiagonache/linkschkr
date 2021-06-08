@@ -1,6 +1,7 @@
 package links_test
 
 import (
+	"fmt"
 	"io"
 	"links"
 	"net/http"
@@ -76,5 +77,38 @@ func TestNotFoundLink(t *testing.T) {
 	}
 	if !cmp.Equal(wantFailures, gotFailures, cmpopts.EquateErrors()) {
 		t.Errorf(cmp.Diff(wantFailures, gotFailures, cmpopts.EquateErrors()))
+	}
+}
+
+func TestCheck(t *testing.T) {
+	t.Parallel()
+	f, err := os.Open("testdata/href_broken_link.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("error reading file: %v", err)
+	}
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, string(content))
+	}))
+
+	gotFailures, err := links.Check(ts.URL,
+		links.WithHTTPClient(ts.Client()),
+		links.WithStdout(io.Discard),
+		links.WithIntervalInMs(500),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFailures := []*links.Result{{
+		State: "down",
+		URL:   "http://127.0.0.1:0",
+	}}
+	if !cmp.Equal(wantFailures, gotFailures, cmpopts.IgnoreFields(links.Result{}, "Error", "Refer")) {
+		t.Errorf(cmp.Diff(wantFailures, gotFailures, cmpopts.IgnoreFields(links.Result{}, "Error", "Refer")))
 	}
 }
