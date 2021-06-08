@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"links"
 	"log"
@@ -28,15 +27,9 @@ func main() {
 		writer = io.Discard
 	}
 
-	_, failures, err := links.Check(*site,
+	links.Check(*site,
 		links.WithDebug(writer),
 		links.WithQuite(*quite),
 		links.WithRecursive(*recursive),
 	)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, fail := range failures {
-		fmt.Println(fail.URL, fail.ResponseCode)
-	}
 }
