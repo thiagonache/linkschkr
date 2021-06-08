@@ -64,7 +64,7 @@ func Logger(w io.Writer, component string, msg string) {
 }
 
 func (l *Links) DoRequest(method, site string, client *http.Client) (*http.Response, error) {
-	client.Timeout = l.Interval + ((l.Interval * 10) / 100)
+	client.Timeout = l.Interval * 2
 	req, err := http.NewRequest(method, site, nil)
 	if err != nil {
 		return nil, err
@@ -219,9 +219,9 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
-func WithRecursive(b bool) Option {
+func WithNoRecursion(b bool) Option {
 	return func(l *Links) {
-		l.Recursive = b
+		l.Recursive = !b
 	}
 }
 

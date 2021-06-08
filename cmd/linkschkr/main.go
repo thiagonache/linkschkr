@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"links"
 	"log"
@@ -9,11 +10,10 @@ import (
 )
 
 func main() {
-	// I need help to improve this later on
 	site := flag.String("site", "", "URL to check links")
 	debug := flag.Bool("debug", false, "Run in debug mode")
 	quite := flag.Bool("quite", false, "Outputs nothing but the final statistics")
-	recursive := flag.Bool("recursive", true, "Run recursively")
+	noRecursion := flag.Bool("no-recursion", false, "Does not run recursively")
 
 	flag.Parse()
 	if *site == "" {
@@ -27,9 +27,13 @@ func main() {
 		writer = io.Discard
 	}
 
-	links.Check(*site,
+	failures := links.Check(*site,
 		links.WithDebug(writer),
 		links.WithQuite(*quite),
-		links.WithRecursive(*recursive),
+		links.WithNoRecursion(*noRecursion),
 	)
+	fmt.Println("Failures:")
+	for _, fail := range failures {
+		fmt.Printf("URL: %q, State: %q, Err: %v\n", fail.URL, fail.State, fail.Error)
+	}
 }

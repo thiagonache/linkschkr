@@ -20,7 +20,7 @@ func TestValidLinkIntegration(t *testing.T) {
 	}
 
 	gotFailures := links.Check(testURL,
-		links.WithRecursive(false),
+		links.WithNoRecursion(true),
 		links.WithStdout(io.Discard),
 	)
 	wantFailures := []*links.Result{}
