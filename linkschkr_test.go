@@ -13,7 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
-func TestValidLinkIntegration(t *testing.T) {
+func TestCheckValidLinkIntegration(t *testing.T) {
 	t.Parallel()
 	testURL := os.Getenv("LINKSCHKR_TESTS_url")
 	if testURL == "" {
@@ -33,7 +33,7 @@ func TestValidLinkIntegration(t *testing.T) {
 	}
 }
 
-func TestValidLink(t *testing.T) {
+func TestCheckValidLink(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -54,7 +54,7 @@ func TestValidLink(t *testing.T) {
 	}
 }
 
-func TestNotFoundLink(t *testing.T) {
+func TestCheckNotFoundLink(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -80,7 +80,7 @@ func TestNotFoundLink(t *testing.T) {
 	}
 }
 
-func TestCheck(t *testing.T) {
+func TestCheckBrokenLink(t *testing.T) {
 	t.Parallel()
 	f, err := os.Open("testdata/href_broken_link.html")
 	if err != nil {
