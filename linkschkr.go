@@ -19,7 +19,7 @@ type work struct {
 }
 
 type stats struct {
-	total int
+	failures, successes, total int
 }
 type checked struct {
 	mu    sync.Mutex
@@ -205,9 +205,12 @@ func (l *links) failures() []*Result {
 func (l *links) readResults() {
 	for r := range l.results {
 		l.stats.total += 1
+		l.stats.successes += 1
 		r.State = "up"
 		if r.ResponseCode != http.StatusOK {
 			r.State = "down"
+			l.stats.successes -= 1
+			l.stats.failures += 1
 		}
 		Logger(l.debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", r.URL, r.State, r.ResponseCode, r.Refer, r.Error))
 		l.responses = append(l.responses, r)
