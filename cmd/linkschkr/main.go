@@ -26,12 +26,16 @@ func main() {
 	if *quite {
 		writer = io.Discard
 	}
-	failures := links.Check(*site,
+	failures, err := links.Check(*site,
 		links.WithDebug(writer),
 		links.WithQuite(*quite),
 		links.WithNoRecursion(*noRecursion),
 		links.WithIntervalInMs(*interval),
 	)
+	if err != nil {
+		links.Logger(os.Stderr, "main", err.Error())
+		os.Exit(1)
+	}
 	links.Logger(os.Stdout, "main", "Failures:")
 	for _, fail := range failures {
 		links.Logger(os.Stdout, "main", fmt.Sprintf("URL: %q Response: %d State: %q Err: %v Refer: %q\n", fail.URL, fail.ResponseCode, fail.State, fail.Error, fail.Refer))

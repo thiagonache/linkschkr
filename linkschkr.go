@@ -49,12 +49,14 @@ type option func(*links)
 
 type links struct {
 	debug      io.Writer
+	domain     string
 	httpClient http.Client
 	interval   time.Duration
 	quite      bool
 	recursive  bool
 	responses  []*Result
 	results    chan *Result
+	scheme     string
 	stats      stats
 	stdout     io.Writer
 	wg         sync.WaitGroup
@@ -62,6 +64,41 @@ type links struct {
 
 func Logger(w io.Writer, component string, msg string) {
 	fmt.Fprintf(w, "[%s] [%s] %s\n", time.Now().UTC().Format(time.RFC3339), component, msg)
+}
+
+func Check(site string, opts ...option) ([]*Result, error) {
+	l := &links{
+		debug:      io.Discard,
+		httpClient: http.Client{},
+		interval:   1 * time.Second,
+		recursive:  true,
+		responses:  []*Result{},
+		results:    make(chan *Result),
+		stdout:     os.Stdout,
+	}
+	for _, o := range opts {
+		o(l)
+	}
+	url, err := url.Parse(site)
+	if err != nil {
+		return nil, err
+	}
+	l.scheme, l.domain = url.Scheme, url.Host
+	if l.quite {
+		l.debug = io.Discard
+		l.stdout = io.Discard
+	}
+	checked := &Checked{
+		Items: map[string]struct{}{},
+	}
+	go l.readResults()
+	limiter := time.NewTicker(l.interval)
+	l.wg.Add(1)
+	checked.existOrAdd(site)
+	go l.fetch(Work{site: site}, checked, limiter)
+	l.wg.Wait()
+	Logger(l.stdout, "Checker", fmt.Sprintf("total checks performed is %d", l.stats.total))
+	return l.failures(), nil
 }
 
 func (l *links) doRequest(method, site string, client *http.Client) (*http.Response, error) {
@@ -114,7 +151,7 @@ func (l *links) fetch(work Work, c *Checked, limiter *time.Ticker) {
 		return
 	}
 	if l.recursive {
-		extraSites, err := l.ParseBody(resp.Body, work.site)
+		extraSites, err := l.parseBody(resp.Body, work.site)
 		if err != nil {
 			Logger(l.stdout, "Fetcher", "error looking for extra sites")
 		}
@@ -131,27 +168,20 @@ func (l *links) fetch(work Work, c *Checked, limiter *time.Ticker) {
 	Logger(l.debug, "Fetcher", "done")
 }
 
-func (l *links) ParseBody(r io.Reader, site string) ([]string, error) {
+func (l *links) parseBody(r io.Reader, site string) ([]string, error) {
 	extraURLs := []string{}
 	doc, err := htmlquery.Parse(r)
 	if err != nil {
 		return nil, err
 	}
 	list := htmlquery.Find(doc, "//a/@href")
-	site = strings.TrimSuffix(site, "/")
 	for _, n := range list {
 		href := htmlquery.SelectAttr(n, "href")
 		switch {
 		case strings.HasPrefix(href, "//"):
 			Logger(l.debug, "ParseBody", "not implemented yet")
 		case strings.HasPrefix(href, "/"):
-			href = strings.TrimSuffix(href, "/")
-			u, err := url.Parse(site)
-			if err != nil {
-				Logger(l.stdout, "ParseBody", fmt.Sprintf("cannot parse url %q", site))
-				continue
-			}
-			baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+			baseURL := fmt.Sprintf("%s://%s", l.scheme, l.domain)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
 		case strings.HasPrefix(href, "http://"):
 			Logger(l.debug, "ParseBody", "not implemented yet")
@@ -183,37 +213,6 @@ func (l *links) readResults() {
 		l.responses = append(l.responses, r)
 		l.wg.Done()
 	}
-}
-
-func Check(site string, opts ...option) []*Result {
-	l := &links{
-		debug:      io.Discard,
-		httpClient: http.Client{},
-		interval:   1 * time.Second,
-		recursive:  true,
-		responses:  []*Result{},
-		results:    make(chan *Result),
-		stdout:     os.Stdout,
-	}
-	for _, o := range opts {
-		o(l)
-	}
-
-	if l.quite {
-		l.debug = io.Discard
-		l.stdout = io.Discard
-	}
-	checked := &Checked{
-		Items: map[string]struct{}{},
-	}
-	go l.readResults()
-	limiter := time.NewTicker(l.interval)
-	l.wg.Add(1)
-	checked.existOrAdd(site)
-	go l.fetch(Work{site: site}, checked, limiter)
-	l.wg.Wait()
-	Logger(l.stdout, "Checker", fmt.Sprintf("total checks performed is %d", l.stats.total))
-	return l.failures()
 }
 
 func WithHTTPClient(client *http.Client) option {
