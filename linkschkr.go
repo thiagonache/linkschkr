@@ -23,15 +23,15 @@ type stats struct {
 }
 type checked struct {
 	mu    sync.Mutex
-	Items map[string]struct{}
+	items map[string]struct{}
 }
 
 func (c *checked) existOrAdd(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_, ok := c.Items[key]
+	_, ok := c.items[key]
 	if !ok {
-		c.Items[key] = struct{}{}
+		c.items[key] = struct{}{}
 		return false
 	}
 	return true
@@ -89,7 +89,7 @@ func Check(site string, opts ...option) ([]*Result, error) {
 		l.stdout = io.Discard
 	}
 	chked := &checked{
-		Items: map[string]struct{}{},
+		items: map[string]struct{}{},
 	}
 	go l.readResults()
 	limiter := time.NewTicker(l.interval)
