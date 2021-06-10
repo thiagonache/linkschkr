@@ -21,20 +21,20 @@ type work struct {
 type stats struct {
 	failures, successes, total int
 }
+
 type checked struct {
 	mu    sync.Mutex
-	items map[string]struct{}
+	items map[string]bool
 }
 
-func (c *checked) existOrAdd(key string) bool {
+func (c *checked) isBeingChecked(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_, ok := c.items[key]
-	if !ok {
-		c.items[key] = struct{}{}
-		return false
+	if c.items[key] {
+		return true
 	}
-	return true
+	c.items[key] = true
+	return false
 }
 
 type Result struct {
@@ -45,138 +45,139 @@ type Result struct {
 	URL          string
 }
 
-type option func(*links)
+type option func(*checker)
 
-type links struct {
+type checker struct {
 	debug      io.Writer
 	domain     string
 	httpClient http.Client
 	interval   time.Duration
-	quite      bool
+	quiet      bool
 	recursive  bool
-	responses  []*Result
-	results    chan *Result
+	responses  []Result
+	results    chan Result
 	scheme     string
 	stats      stats
 	stdout     io.Writer
-	timeout    time.Duration
 	wg         sync.WaitGroup
 }
 
-func Logger(w io.Writer, component string, msg string) {
-	fmt.Fprintf(w, "[%s] [%s] %s\n", time.Now().UTC().Format(time.RFC3339), component, msg)
-}
-
-func Check(sites []string, opts ...option) ([]*Result, error) {
-	l := &links{
+func Check(sites []string, opts ...option) ([]Result, error) {
+	l := &checker{
 		debug:      io.Discard,
 		httpClient: http.Client{},
 		interval:   2000 * time.Millisecond,
 		recursive:  true,
-		responses:  []*Result{},
-		results:    make(chan *Result),
+		responses:  []Result{},
+		results:    make(chan Result),
 		stdout:     os.Stdout,
-		timeout:    4000 * time.Millisecond,
 	}
 	for _, o := range opts {
 		o(l)
 	}
-	if l.quite {
+	if l.quiet {
 		l.debug = io.Discard
 		l.stdout = io.Discard
 	}
 	chked := &checked{
-		items: map[string]struct{}{},
+		items: map[string]bool{},
 	}
 	go l.readResults()
 	limiter := time.NewTicker(l.interval)
 	for _, site := range sites {
 		url, err := url.Parse(site)
 		if err != nil {
-			Logger(l.stdout, "Checker", err.Error())
+			l.Log("Checker", err.Error())
 			continue
 		}
 		l.scheme, l.domain = url.Scheme, url.Host
 		l.wg.Add(1)
-		chked.existOrAdd(site)
+		chked.isBeingChecked(site)
 		go l.fetch(work{site: site}, chked, limiter)
 		l.wg.Wait()
 	}
 
-	Logger(l.stdout, "Checker", fmt.Sprintf("total checks performed is %d", l.stats.total))
+	l.Log("Checker", fmt.Sprintf("total checks performed is %d", l.stats.total))
 	return l.failures(), nil
 }
 
-func (l *links) doRequest(method, site string, client *http.Client) (*http.Response, error) {
-	client.Timeout = l.interval
+func (l *checker) Debug(component string, msg string) {
+	fmt.Fprintf(l.debug, "[%s] [%s] %s\n", time.Now().UTC().Format(time.RFC3339), component, msg)
+}
+
+func (l *checker) Log(component string, msg string) {
+	fmt.Fprintf(l.stdout, "[%s] [%s] %s\n", time.Now().UTC().Format(time.RFC3339), component, msg)
+}
+
+func (l *checker) doRequest(method, site string) (*http.Response, error) {
 	req, err := http.NewRequest(method, site, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("user-agent", "Linkschkr 0.0.1 Beta")
 	req.Header.Set("accept", "*/*")
-	resp, err := client.Do(req)
+	resp, err := l.httpClient.Do(req)
 
 	return resp, err
 }
 
-func (l *links) fetch(wrk work, c *checked, limiter *time.Ticker) {
-	Logger(l.debug, "Fetcher", "started")
-	<-limiter.C
-	client := &l.httpClient
-	Logger(l.debug, "Fetcher", fmt.Sprintf("checking site %s", wrk.site))
-	result := &Result{URL: wrk.site, Refer: wrk.refer}
-	resp, err := l.doRequest("HEAD", wrk.site, client)
+func (l *checker) fetch(wrk work, c *checked, limiter *time.Ticker) {
+	l.Debug("Fetcher", fmt.Sprintf("checking site %s", wrk.site))
+	result := Result{URL: wrk.site, Refer: wrk.refer}
+	resp, err := l.doRequest(http.MethodHead, wrk.site)
 	if err != nil {
 		result.Error = err
 		l.results <- result
 		return
 	}
 	result.ResponseCode = resp.StatusCode
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusMethodNotAllowed {
+	if broken(resp.StatusCode) {
 		l.results <- result
 		return
 	}
-	ct := resp.Header.Get("Content-Type")
-	Logger(l.debug, "Fetcher", fmt.Sprintf("Content type %s", ct))
-	if !strings.HasPrefix(ct, "text/html") {
+	if nonHTML(resp.Header) {
 		l.results <- result
 		return
 	}
-	Logger(l.debug, "Fetcher", "Run GET method")
-	resp, err = l.doRequest("GET", wrk.site, client)
+	l.Debug("Fetcher", "Run GET method")
+	resp, err = l.doRequest("GET", wrk.site)
 	if err != nil {
 		result.Error = err
 		l.results <- result
 		return
 	}
 	result.ResponseCode = resp.StatusCode
-	Logger(l.debug, "Fetcher", fmt.Sprintf("response code %d", resp.StatusCode))
+	l.Debug("Fetcher", fmt.Sprintf("response code %d", resp.StatusCode))
 	if resp.StatusCode != http.StatusOK {
 		l.results <- result
 		return
 	}
-	// wrk.site is a already fetched url, so i'm sure it won't error
-	u, _ := url.Parse(wrk.site)
+	u, err := url.Parse(wrk.site)
+	if err != nil {
+		result.Error = err
+		l.results <- result
+		return
+	}
 	if l.recursive && u.Host == l.domain {
 		extraSites, err := l.parseBody(resp.Body, wrk.site)
 		if err != nil {
-			Logger(l.stdout, "Fetcher", "error looking for extra sites")
+			l.Log("Fetcher", "error looking for extra sites")
 		}
 		for _, s := range extraSites {
-			exist := c.existOrAdd(s)
-			if !exist {
-				l.wg.Add(1)
-				go l.fetch(work{site: s, refer: wrk.site}, c, limiter)
+			if c.isBeingChecked(s) {
+				continue
 			}
+			l.wg.Add(1)
+			<-limiter.C
+			go l.fetch(work{site: s, refer: wrk.site}, c, limiter)
 		}
 	}
 	result.State = "up"
 	l.results <- result
-	Logger(l.debug, "Fetcher", "done")
+	l.Debug("Fetcher", "done")
 }
 
-func (l *links) parseBody(r io.Reader, site string) ([]string, error) {
+func (l *checker) parseBody(r io.Reader, site string) ([]string, error) {
 	extraURLs := []string{}
 	doc, err := htmlquery.Parse(r)
 	if err != nil {
@@ -187,7 +188,7 @@ func (l *links) parseBody(r io.Reader, site string) ([]string, error) {
 		href := htmlquery.SelectAttr(n, "href")
 		switch {
 		case strings.HasPrefix(href, "//"):
-			Logger(l.debug, "ParseBody", "not implemented yet")
+			l.Debug("ParseBody", "not implemented yet")
 		case strings.HasPrefix(href, "/"):
 			baseURL := fmt.Sprintf("%s://%s", l.scheme, l.domain)
 			extraURLs = append(extraURLs, fmt.Sprintf("%s%s", baseURL, href))
@@ -200,8 +201,8 @@ func (l *links) parseBody(r io.Reader, site string) ([]string, error) {
 	return extraURLs, nil
 }
 
-func (l *links) failures() []*Result {
-	resp := []*Result{}
+func (l *checker) failures() []Result {
+	resp := []Result{}
 	for _, r := range l.responses {
 		if r.ResponseCode != http.StatusOK {
 			resp = append(resp, r)
@@ -210,7 +211,7 @@ func (l *links) failures() []*Result {
 	return resp
 }
 
-func (l *links) readResults() {
+func (l *checker) readResults() {
 	for r := range l.results {
 		l.stats.total += 1
 		l.stats.successes += 1
@@ -220,36 +221,50 @@ func (l *links) readResults() {
 			l.stats.successes -= 1
 			l.stats.failures += 1
 		}
-		Logger(l.debug, "ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", r.URL, r.State, r.ResponseCode, r.Refer, r.Error))
+		l.Debug("ReadResults", fmt.Sprintf("result => URL: %s State: %s Code: %d Refer: %s Error: %v", r.URL, r.State, r.ResponseCode, r.Refer, r.Error))
 		l.responses = append(l.responses, r)
 		l.wg.Done()
 	}
 }
 
 func WithHTTPClient(client *http.Client) option {
-	return func(l *links) { l.httpClient = *client }
+	return func(l *checker) { l.httpClient = *client }
 }
 
 func WithNoRecursion(b bool) option {
-	return func(l *links) { l.recursive = !b }
+	return func(l *checker) { l.recursive = !b }
 }
 
 func WithStdout(w io.Writer) option {
-	return func(l *links) { l.stdout = w }
+	return func(l *checker) { l.stdout = w }
 }
 
 func WithDebug(w io.Writer) option {
-	return func(l *links) { l.debug = w }
+	return func(l *checker) { l.debug = w }
 }
 
 func WithQuite(quite bool) option {
-	return func(l *links) { l.quite = quite }
+	return func(l *checker) { l.quiet = quite }
 }
 
 func WithIntervalInMs(n int) option {
-	return func(l *links) { l.interval = time.Duration(n) * time.Millisecond }
+	return func(l *checker) { l.interval = time.Duration(n) * time.Millisecond }
 }
 
-func WithTimeoutInMs(n int) option {
-	return func(l *links) { l.timeout = time.Duration(n) * time.Millisecond }
+func broken(s int) bool {
+	switch s {
+	case http.StatusOK:
+		return false
+	case http.StatusMethodNotAllowed:
+		return false
+	case http.StatusForbidden:
+		return false
+	default:
+		return true
+	}
+}
+
+func nonHTML(header http.Header) bool {
+	ct := header.Get("Content-Type")
+	return !strings.HasPrefix(ct, "text/html")
 }

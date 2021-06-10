@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -48,7 +49,7 @@ func TestCheckValidLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantFailures := []*links.Result{}
+	wantFailures := []links.Result{}
 	if !cmp.Equal(wantFailures, gotFailures, cmpopts.EquateErrors()) {
 		t.Errorf(cmp.Diff(wantFailures, gotFailures, cmpopts.EquateErrors()))
 	}
@@ -68,7 +69,7 @@ func TestCheckNotFoundLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantFailures := []*links.Result{
+	wantFailures := []links.Result{
 		{
 			URL:          ts.URL,
 			ResponseCode: http.StatusNotFound,
@@ -95,19 +96,21 @@ func TestCheckBrokenLink(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, string(content))
 	}))
-
 	gotFailures, err := links.Check([]string{ts.URL},
+		links.WithHTTPClient(&http.Client{
+			Timeout: time.Second,
+		}),
 		links.WithStdout(io.Discard),
-		links.WithIntervalInMs(1000),
+		links.WithIntervalInMs(1),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantFailures := []*links.Result{{
+	wantFailures := []links.Result{{
 		State: "down",
 		URL:   "http://127.0.0.1:0",
 	}}
 	if !cmp.Equal(wantFailures, gotFailures, cmpopts.IgnoreFields(links.Result{}, "Error", "Refer")) {
-		t.Errorf(cmp.Diff(wantFailures, gotFailures, cmpopts.IgnoreFields(links.Result{}, "Error", "Refer")))
+		t.Errorf(cmp.Diff(wantFailures, gotFailures, cmpopts.IgnoreFields(links.Result{}, "Refer")))
 	}
 }

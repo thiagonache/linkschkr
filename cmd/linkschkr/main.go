@@ -9,17 +9,18 @@ import (
 )
 
 func main() {
-	debug := flag.Bool("debug", false, "Run in debug mode")
-	quite := flag.Bool("quite", false, "Outputs nothing but the final statistics")
-	noRecursion := flag.Bool("no-recursion", false, "Does not run recursively")
-	interval := flag.Int("interval", 2000, "Interval between each check in milliseconds")
-	timeout := flag.Int("timeout", 4000, "Timeout between each check in milliseconds")
-	flag.Parse()
-	if flag.NArg() < 1 {
+	flagSet := flag.NewFlagSet("flags", flag.ExitOnError)
+	debug := flagSet.Bool("debug", false, "Run in debug mode")
+	quite := flagSet.Bool("quite", false, "Outputs nothing but the final statistics")
+	noRecursion := flagSet.Bool("no-recursion", false, "Does not run recursively")
+	interval := flagSet.Int("interval", 2000, "Interval between each check in milliseconds")
+	timeout := flagSet.Int("timeout", 4000, "Timeout between each check in milliseconds")
+	flagSet.Parse(os.Args[1:])
+	if flagSet.NArg() < 1 {
 		fmt.Println("Please, specify the sites as arguments")
 		os.Exit(1)
 	}
-	sites := flag.Args()
+	sites := flagSet.Args()
 	writer := io.Discard
 	if *debug {
 		writer = os.Stderr
