@@ -59,6 +59,7 @@ type links struct {
 	scheme     string
 	stats      stats
 	stdout     io.Writer
+	timeout    time.Duration
 	wg         sync.WaitGroup
 }
 
@@ -66,24 +67,20 @@ func Logger(w io.Writer, component string, msg string) {
 	fmt.Fprintf(w, "[%s] [%s] %s\n", time.Now().UTC().Format(time.RFC3339), component, msg)
 }
 
-func Check(site string, opts ...option) ([]*Result, error) {
+func Check(sites []string, opts ...option) ([]*Result, error) {
 	l := &links{
 		debug:      io.Discard,
 		httpClient: http.Client{},
-		interval:   2 * time.Second,
+		interval:   2000 * time.Millisecond,
 		recursive:  true,
 		responses:  []*Result{},
 		results:    make(chan *Result),
 		stdout:     os.Stdout,
+		timeout:    4000 * time.Millisecond,
 	}
 	for _, o := range opts {
 		o(l)
 	}
-	url, err := url.Parse(site)
-	if err != nil {
-		return nil, err
-	}
-	l.scheme, l.domain = url.Scheme, url.Host
 	if l.quite {
 		l.debug = io.Discard
 		l.stdout = io.Discard
@@ -93,10 +90,19 @@ func Check(site string, opts ...option) ([]*Result, error) {
 	}
 	go l.readResults()
 	limiter := time.NewTicker(l.interval)
-	l.wg.Add(1)
-	chked.existOrAdd(site)
-	go l.fetch(work{site: site}, chked, limiter)
-	l.wg.Wait()
+	for _, site := range sites {
+		url, err := url.Parse(site)
+		if err != nil {
+			Logger(l.stdout, "Checker", err.Error())
+			continue
+		}
+		l.scheme, l.domain = url.Scheme, url.Host
+		l.wg.Add(1)
+		chked.existOrAdd(site)
+		go l.fetch(work{site: site}, chked, limiter)
+		l.wg.Wait()
+	}
+
 	Logger(l.stdout, "Checker", fmt.Sprintf("total checks performed is %d", l.stats.total))
 	return l.failures(), nil
 }
@@ -242,4 +248,8 @@ func WithQuite(quite bool) option {
 
 func WithIntervalInMs(n int) option {
 	return func(l *links) { l.interval = time.Duration(n) * time.Millisecond }
+}
+
+func WithTimeoutInMs(n int) option {
+	return func(l *links) { l.timeout = time.Duration(n) * time.Millisecond }
 }

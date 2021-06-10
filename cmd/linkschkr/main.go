@@ -5,20 +5,21 @@ import (
 	"fmt"
 	"io"
 	"links"
-	"log"
 	"os"
 )
 
 func main() {
-	site := flag.String("site", "", "URL to check links")
 	debug := flag.Bool("debug", false, "Run in debug mode")
 	quite := flag.Bool("quite", false, "Outputs nothing but the final statistics")
 	noRecursion := flag.Bool("no-recursion", false, "Does not run recursively")
 	interval := flag.Int("interval", 2000, "Interval between each check in milliseconds")
+	timeout := flag.Int("timeout", 4000, "Timeout between each check in milliseconds")
 	flag.Parse()
-	if *site == "" {
-		log.Fatal("Missing -site argument")
+	if flag.NArg() < 1 {
+		fmt.Println("Please, specify the sites as arguments")
+		os.Exit(1)
 	}
+	sites := flag.Args()
 	writer := io.Discard
 	if *debug {
 		writer = os.Stderr
@@ -26,11 +27,12 @@ func main() {
 	if *quite {
 		writer = io.Discard
 	}
-	failures, err := links.Check(*site,
+	failures, err := links.Check(sites,
 		links.WithDebug(writer),
 		links.WithQuite(*quite),
 		links.WithNoRecursion(*noRecursion),
 		links.WithIntervalInMs(*interval),
+		links.WithTimeoutInMs(*timeout),
 	)
 	if err != nil {
 		links.Logger(os.Stderr, "main", err.Error())

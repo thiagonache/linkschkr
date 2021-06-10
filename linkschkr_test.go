@@ -20,7 +20,7 @@ func TestCheckValidLinkIntegration(t *testing.T) {
 		t.Skip("Set LINKSCHKR_TESTS_url=<url to check> to run integration tests")
 	}
 
-	gotFailures, err := links.Check(testURL,
+	gotFailures, err := links.Check([]string{testURL},
 		links.WithNoRecursion(true),
 		links.WithStdout(io.Discard),
 	)
@@ -40,7 +40,7 @@ func TestCheckValidLink(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	gotFailures, err := links.Check(ts.URL,
+	gotFailures, err := links.Check([]string{ts.URL},
 		links.WithHTTPClient(ts.Client()),
 		links.WithStdout(io.Discard),
 		links.WithIntervalInMs(500),
@@ -60,7 +60,7 @@ func TestCheckNotFoundLink(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 
-	gotFailures, err := links.Check(ts.URL,
+	gotFailures, err := links.Check([]string{ts.URL},
 		links.WithStdout(io.Discard),
 		links.WithHTTPClient(ts.Client()),
 		links.WithIntervalInMs(500),
@@ -96,9 +96,9 @@ func TestCheckBrokenLink(t *testing.T) {
 		fmt.Fprint(w, string(content))
 	}))
 
-	gotFailures, err := links.Check(ts.URL,
+	gotFailures, err := links.Check([]string{ts.URL},
 		links.WithStdout(io.Discard),
-		links.WithIntervalInMs(500),
+		links.WithIntervalInMs(1000),
 	)
 	if err != nil {
 		t.Fatal(err)
