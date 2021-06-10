@@ -28,7 +28,7 @@ func TestCheckValidLinkIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantFailures := []*links.Result{}
+	wantFailures := []links.Result{}
 	if !cmp.Equal(wantFailures, gotFailures) {
 		t.Errorf(cmp.Diff(wantFailures, gotFailures))
 	}
