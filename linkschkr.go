@@ -55,7 +55,6 @@ type checker struct {
 	quiet      bool
 	recursive  bool
 	responses  []Result
-	results    chan Result
 	scheme     string
 	stats      stats
 	stdout     io.Writer
@@ -69,7 +68,6 @@ func Check(sites []string, opts ...option) ([]Result, error) {
 		interval:   2000 * time.Millisecond,
 		recursive:  true,
 		responses:  []Result{},
-		results:    make(chan Result),
 		stdout:     os.Stdout,
 	}
 	for _, o := range opts {
@@ -82,7 +80,8 @@ func Check(sites []string, opts ...option) ([]Result, error) {
 	chked := &checked{
 		items: map[string]bool{},
 	}
-	go c.readResults()
+	results := make(chan Result)
+	go c.readResults(results)
 	limiter := time.NewTicker(c.interval)
 	for _, site := range sites {
 		url, err := url.Parse(site)
@@ -93,7 +92,7 @@ func Check(sites []string, opts ...option) ([]Result, error) {
 		c.scheme, c.domain = url.Scheme, url.Host
 		c.wg.Add(1)
 		chked.isBeingChecked(site)
-		go c.fetch(work{site: site}, chked, limiter)
+		go c.fetch(work{site: site}, chked, limiter, results)
 		c.wg.Wait()
 	}
 
@@ -121,41 +120,41 @@ func (c *checker) doRequest(method, site string) (*http.Response, error) {
 	return resp, err
 }
 
-func (c *checker) fetch(wrk work, chked *checked, limiter *time.Ticker) {
+func (c *checker) fetch(wrk work, chked *checked, limiter *time.Ticker, results chan<- Result) {
 	c.Debug("Fetcher", fmt.Sprintf("checking site %s", wrk.site))
 	result := Result{URL: wrk.site, Refer: wrk.refer}
 	resp, err := c.doRequest(http.MethodHead, wrk.site)
 	if err != nil {
 		result.Error = err
-		c.results <- result
+		results <- result
 		return
 	}
 	result.ResponseCode = resp.StatusCode
 	if broken(resp.StatusCode) {
-		c.results <- result
+		results <- result
 		return
 	}
 	if nonHTML(resp.Header) {
-		c.results <- result
+		results <- result
 		return
 	}
 	c.Debug("Fetcher", "Run GET method")
 	resp, err = c.doRequest("GET", wrk.site)
 	if err != nil {
 		result.Error = err
-		c.results <- result
+		results <- result
 		return
 	}
 	result.ResponseCode = resp.StatusCode
 	c.Debug("Fetcher", fmt.Sprintf("response code %d", resp.StatusCode))
 	if resp.StatusCode != http.StatusOK {
-		c.results <- result
+		results <- result
 		return
 	}
 	u, err := url.Parse(wrk.site)
 	if err != nil {
 		result.Error = err
-		c.results <- result
+		results <- result
 		return
 	}
 	if c.recursive && u.Host == c.domain {
@@ -169,11 +168,10 @@ func (c *checker) fetch(wrk work, chked *checked, limiter *time.Ticker) {
 			}
 			c.wg.Add(1)
 			<-limiter.C
-			go c.fetch(work{site: s, refer: wrk.site}, chked, limiter)
+			go c.fetch(work{site: s, refer: wrk.site}, chked, limiter, results)
 		}
 	}
-	result.State = "up"
-	c.results <- result
+	results <- result
 	c.Debug("Fetcher", "done")
 }
 
@@ -211,8 +209,8 @@ func (c *checker) failures() []Result {
 	return resp
 }
 
-func (c *checker) readResults() {
-	for r := range c.results {
+func (c *checker) readResults(results <-chan Result) {
+	for r := range results {
 		c.stats.total += 1
 		c.stats.successes += 1
 		r.State = "up"
