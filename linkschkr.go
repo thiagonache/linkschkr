@@ -38,11 +38,11 @@ func (c *checked) isBeingChecked(key string) bool {
 }
 
 type Result struct {
-	Error        error
-	Refer        string
-	ResponseCode int
-	State        string
-	URL          string
+	Error        error  `json:"error"`
+	Refer        string `json:"refer"`
+	ResponseCode int    `json:"responseCode"`
+	State        string `json:"state"`
+	URL          string `json:"url"`
 }
 
 type option func(*checker)
@@ -86,8 +86,10 @@ func Check(sites []string, opts ...option) ([]Result, error) {
 	for _, site := range sites {
 		url, err := url.Parse(site)
 		if err != nil {
-			c.Log("Checker", err.Error())
-			continue
+			return nil, err
+		}
+		if url.Scheme == "" || url.Host == "" {
+			return nil, fmt.Errorf("invalid URL %q", url)
 		}
 		c.scheme, c.domain = url.Scheme, url.Host
 		c.wg.Add(1)
