@@ -27,8 +27,7 @@ func webServerCheck(w http.ResponseWriter, r *http.Request) {
 	queryString := r.URL.Query()
 	qsSite := queryString["site"]
 	if len(qsSite) == 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(w, `{"err":"cannot find site in query string"`)
+		http.Error(w, `{"err":"cannot find site in query string"}`, http.StatusBadRequest)
 		return
 	}
 	var noRecursion bool
@@ -37,8 +36,7 @@ func webServerCheck(w http.ResponseWriter, r *http.Request) {
 	if len(qsNoRecursion) > 0 {
 		noRecursion, err = strconv.ParseBool(qsNoRecursion[0])
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintln(w, `{"err":"cannot convert no-recursion to boolean"`)
+			http.Error(w, `{"err":"cannot convert no-recursion to boolean"}`, http.StatusBadRequest)
 			return
 		}
 	}
@@ -54,14 +52,12 @@ func webServerCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	results, err := Check(qsSite, WithStdout(output), WithDebug(debug), WithNoRecursion(noRecursion))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(w, err.Error())
+		http.Error(w, fmt.Sprintf(`{"err":"%v"}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 	err = json.NewEncoder(w).Encode(results)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "error encoding results: %v", err)
+		http.Error(w, fmt.Sprintf(`{"err":"error encoding results %v"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
