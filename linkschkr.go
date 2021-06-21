@@ -65,7 +65,7 @@ func Check(sites []string, opts ...option) ([]Result, error) {
 	c := &checker{
 		debug:      io.Discard,
 		httpClient: http.Client{},
-		interval:   2000 * time.Millisecond,
+		interval:   1500 * time.Millisecond,
 		recursive:  true,
 		responses:  []Result{},
 		stdout:     os.Stdout,

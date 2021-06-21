@@ -10,7 +10,10 @@ import (
 
 func TestCheckWebServer(t *testing.T) {
 	t.Parallel()
-	request, _ := http.NewRequest(http.MethodGet, "/check?site=https://bitfieldconsulting.com&no-recursion=true", nil)
+	request, err := http.NewRequest(http.MethodGet, "/check?site=https://bitfieldconsulting.com&no-recursion=true", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	response := httptest.NewRecorder()
 	links.WebServerHandler(response, request)
 	got := response.Body.String()

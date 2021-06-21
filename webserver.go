@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 )
 
 func webServerCheck(w http.ResponseWriter, r *http.Request) {
@@ -44,23 +45,35 @@ func webServerCheck(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, err.Error())
 		return
 	}
+	err = json.NewEncoder(w).Encode(results)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "error encoding results: %v", err)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(results)
 }
 
 func WebServerHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		webServerCheck(w, r)
-	default:
+	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
 	}
+	webServerCheck(w, r)
 }
 
-func ServeHTTP() error {
+func ListenAndServe(addr string) error {
 	router := http.NewServeMux()
 	handlerCheck := http.HandlerFunc(WebServerHandler)
 	router.Handle("/check", handlerCheck)
-	return http.ListenAndServe(":8080", router)
+	srv := http.Server{
+		Addr:         addr,
+		Handler:      router,
+		ReadTimeout:  2 * time.Second,
+		WriteTimeout: 3600 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	err := srv.ListenAndServe()
+	return err
 }
