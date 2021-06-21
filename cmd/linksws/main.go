@@ -6,5 +6,5 @@ import (
 )
 
 func main() {
-	log.Fatal(links.ListenAndServe(":8080"))
+	log.Fatal(links.ListenAndServe())
 }

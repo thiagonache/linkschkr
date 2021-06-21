@@ -8,7 +8,20 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
+
+type Config struct {
+	Server struct {
+		Addr    string `yaml:"addr"`
+		Timeout struct {
+			Read  int `yaml:"read"`
+			Write int `yaml:"write"`
+			Idle  int `yaml:"idle"`
+		} `yaml:"timeout"`
+	} `yaml:"server"`
+}
 
 func webServerCheck(w http.ResponseWriter, r *http.Request) {
 	queryString := r.URL.Query()
@@ -63,17 +76,29 @@ func WebServerHandler(w http.ResponseWriter, r *http.Request) {
 	webServerCheck(w, r)
 }
 
-func ListenAndServe(addr string) error {
+func ListenAndServe() error {
+	f, err := os.Open("config/config.yaml")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var cfg Config
+	decoder := yaml.NewDecoder(f)
+	err = decoder.Decode(&cfg)
+	if err != nil {
+		return fmt.Errorf("cannot decode config file: %v", err)
+	}
+
 	router := http.NewServeMux()
 	handlerCheck := http.HandlerFunc(WebServerHandler)
 	router.Handle("/check", handlerCheck)
 	srv := http.Server{
-		Addr:         addr,
+		Addr:         cfg.Server.Addr,
 		Handler:      router,
-		ReadTimeout:  2 * time.Second,
-		WriteTimeout: 3600 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  time.Duration(cfg.Server.Timeout.Read) * time.Second,
+		WriteTimeout: time.Duration(cfg.Server.Timeout.Write) * time.Second,
+		IdleTimeout:  time.Duration(cfg.Server.Timeout.Idle) * time.Second,
 	}
-	err := srv.ListenAndServe()
+	err = srv.ListenAndServe()
 	return err
 }
