@@ -44,7 +44,7 @@ func TestCheckValidLink(t *testing.T) {
 	gotFailures, err := links.Check([]string{ts.URL},
 		links.WithHTTPClient(ts.Client()),
 		links.WithStdout(io.Discard),
-		links.WithIntervalInMs(500),
+		links.WithIntervalInMs(200),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestCheckNotFoundLink(t *testing.T) {
 	gotFailures, err := links.Check([]string{ts.URL},
 		links.WithStdout(io.Discard),
 		links.WithHTTPClient(ts.Client()),
-		links.WithIntervalInMs(500),
+		links.WithIntervalInMs(200),
 	)
 	if err != nil {
 		t.Fatal(err)

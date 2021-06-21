@@ -1,0 +1,6 @@
+server:
+  addr: ":8080"
+  timeout:
+    read: 2
+    write: 3600
+    idle: 120
