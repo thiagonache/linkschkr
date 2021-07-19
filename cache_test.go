@@ -25,7 +25,7 @@ func TestGetCache(t *testing.T) {
 	}
 }
 
-func TestGetCacheExpired(t *testing.T) {
+func TestGetCacheExpiration(t *testing.T) {
 	t.Parallel()
 	url := "https://golang.org"
 	cache := links.NewCache()
