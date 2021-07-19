@@ -23,7 +23,7 @@ func NewCache() *Cache {
 
 func (c *Cache) Get(key string) (string, bool) {
 	value, ok := c.data[key]
-	if value.expires.Sub(time.Now().UTC()) >= 0 {
+	if value.expires.Sub(time.Now().UTC()) > 0 {
 		return value.entry, ok
 	}
 	return "", false
