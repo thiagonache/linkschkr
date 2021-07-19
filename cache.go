@@ -1,13 +1,20 @@
 package links
 
-type CacheStore interface {
-	GetData(key string) string
+type Cache struct {
+	data map[string]string
 }
 
-type CacheServer struct {
-	Data CacheStore
+func NewCache() *Cache {
+	return &Cache{
+		data: map[string]string{},
+	}
 }
 
-func (c *CacheServer) GetCache(key string) string {
-	return c.Data.GetData(key)
+func (c *Cache) Get(key string) (string, bool) {
+	value, ok := c.data[key]
+	return value, ok
+}
+
+func (c *Cache) Store(key, value string) {
+	c.data[key] = value
 }

@@ -45,7 +45,7 @@ type Result struct {
 	URL          string `json:"url"`
 }
 
-type option func(*checker)
+type Option func(*checker)
 
 type checker struct {
 	debug      io.Writer
@@ -61,7 +61,7 @@ type checker struct {
 	wg         sync.WaitGroup
 }
 
-func Check(sites []string, opts ...option) ([]Result, error) {
+func Check(sites []string, opts ...Option) ([]Result, error) {
 	c := &checker{
 		debug:      io.Discard,
 		httpClient: http.Client{},
@@ -227,27 +227,27 @@ func (c *checker) readResults(results <-chan Result) {
 	}
 }
 
-func WithHTTPClient(client *http.Client) option {
+func WithHTTPClient(client *http.Client) Option {
 	return func(c *checker) { c.httpClient = *client }
 }
 
-func WithNoRecursion(b bool) option {
+func WithNoRecursion(b bool) Option {
 	return func(c *checker) { c.recursive = !b }
 }
 
-func WithStdout(w io.Writer) option {
+func WithStdout(w io.Writer) Option {
 	return func(c *checker) { c.stdout = w }
 }
 
-func WithDebug(w io.Writer) option {
+func WithDebug(w io.Writer) Option {
 	return func(c *checker) { c.debug = w }
 }
 
-func WithQuite(quite bool) option {
+func WithQuite(quite bool) Option {
 	return func(c *checker) { c.quiet = quite }
 }
 
-func WithIntervalInMs(n int) option {
+func WithIntervalInMs(n int) Option {
 	return func(c *checker) { c.interval = time.Duration(n) * time.Millisecond }
 }
 

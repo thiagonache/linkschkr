@@ -6,5 +6,6 @@ import (
 )
 
 func main() {
-	log.Fatal(links.ListenAndServe())
+	ws := links.NewWebServer()
+	log.Fatal(ws.ListenAndServe())
 }
