@@ -40,8 +40,8 @@ func TestCheckValidLink(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
 	}))
-
-	gotFailures, err := links.Check([]string{ts.URL},
+	ws := links.NewWebServer()
+	gotFailures, err := ws.CheckFn([]string{ts.URL},
 		links.WithHTTPClient(ts.Client()),
 		links.WithStdout(io.Discard),
 		links.WithIntervalInMs(200),

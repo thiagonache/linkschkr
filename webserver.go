@@ -23,7 +23,13 @@ type Config struct {
 	} `yaml:"server"`
 }
 
-func webServerCheck(w http.ResponseWriter, r *http.Request) {
+type WebServer struct {
+	Cache   *Cache
+	Server  http.Server
+	CheckFn func([]string, ...Option) ([]Result, error)
+}
+
+func (ws *WebServer) webServerCheck(w http.ResponseWriter, r *http.Request) {
 	queryString := r.URL.Query()
 	qsSite := queryString["site"]
 	if len(qsSite) == 0 {
@@ -50,29 +56,45 @@ func webServerCheck(w http.ResponseWriter, r *http.Request) {
 	if len(qsDebug) > 0 {
 		debug = os.Stderr
 	}
-	results, err := Check(qsSite, WithStdout(output), WithDebug(debug), WithNoRecursion(noRecursion))
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"err":"%v"}`, err.Error()), http.StatusBadRequest)
+	value, ok := ws.Cache.Get(qsSite[0])
+	if ok {
+		fmt.Fprint(w, value)
 		return
 	}
-	err = json.NewEncoder(w).Encode(results)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"err":"error encoding results %v"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "return in a bit")
+	ws.Cache.Store(qsSite[0], "return in a bit")
+	go func() {
+		results, err := ws.CheckFn(qsSite, WithStdout(output), WithDebug(debug), WithNoRecursion(noRecursion))
+		if err != nil {
+			ws.Cache.Store(qsSite[0], err.Error())
+			return
+		}
+		output, err := json.Marshal(results)
+		if err != nil {
+			ws.Cache.Store(qsSite[0], err.Error())
+			return
+		}
+		ws.Cache.Store(qsSite[0], string(output))
+	}()
+
 }
 
-func WebServerHandler(w http.ResponseWriter, r *http.Request) {
+func (ws WebServer) WebServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	webServerCheck(w, r)
+	ws.webServerCheck(w, r)
 }
 
-func ListenAndServe() error {
+func NewWebServer() *WebServer {
+	return &WebServer{
+		Cache:   NewCache(),
+		CheckFn: Check,
+	}
+}
+
+func (ws *WebServer) ListenAndServe() error {
 	f, err := os.Open("config/config.yaml")
 	if err != nil {
 		return err
@@ -84,17 +106,16 @@ func ListenAndServe() error {
 	if err != nil {
 		return fmt.Errorf("cannot decode config file: %v", err)
 	}
-
 	router := http.NewServeMux()
-	handlerCheck := http.HandlerFunc(WebServerHandler)
+	handlerCheck := http.HandlerFunc(ws.WebServerHandler)
 	router.Handle("/check", handlerCheck)
-	srv := http.Server{
+	ws.Server = http.Server{
 		Addr:         cfg.Server.Addr,
 		Handler:      router,
 		ReadTimeout:  time.Duration(cfg.Server.Timeout.Read) * time.Second,
 		WriteTimeout: time.Duration(cfg.Server.Timeout.Write) * time.Second,
 		IdleTimeout:  time.Duration(cfg.Server.Timeout.Idle) * time.Second,
 	}
-	err = srv.ListenAndServe()
+	err = ws.Server.ListenAndServe()
 	return err
 }
