@@ -31,6 +31,7 @@ func (c *cache) Get(key string) (string, bool) {
 	if value.expires.Sub(time.Now().UTC()) > 0 {
 		return value.entry, ok
 	}
+	delete(c.data, key)
 	return "", false
 }
 
