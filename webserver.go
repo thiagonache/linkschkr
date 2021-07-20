@@ -24,7 +24,7 @@ type Config struct {
 }
 
 type WebServer struct {
-	Cache   *Cache
+	Cache   *cache
 	Server  http.Server
 	CheckFn func([]string, ...Option) ([]Result, error)
 }

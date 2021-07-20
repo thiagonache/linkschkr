@@ -4,24 +4,29 @@ import (
 	"time"
 )
 
-type Cache struct {
-	data map[string]CacheItem
+type cache struct {
+	data map[string]cacheItem
 	ttl  time.Duration
 }
 
-type CacheItem struct {
+type cacheItem struct {
 	entry   string
 	expires time.Time
 }
 
-func NewCache() *Cache {
-	return &Cache{
-		data: map[string]CacheItem{},
+// NewCache instantiates and returns a new cache object
+func NewCache() *cache {
+	return &cache{
+		data: map[string]cacheItem{},
 		ttl:  86400 * time.Second,
 	}
 }
 
-func (c *Cache) Get(key string) (string, bool) {
+// Get returns a string and a bool for a given key. There are two possible
+// combinations of values returned.
+// The value and true when the key exists and has not been expired yet.
+// An empty string and false when the key does not exist or has been expired.
+func (c *cache) Get(key string) (string, bool) {
 	value, ok := c.data[key]
 	if value.expires.Sub(time.Now().UTC()) > 0 {
 		return value.entry, ok
@@ -29,10 +34,13 @@ func (c *Cache) Get(key string) (string, bool) {
 	return "", false
 }
 
-func (c *Cache) Store(key, value string) {
-	c.data[key] = CacheItem{entry: value, expires: time.Now().UTC().Add(c.ttl)}
+// Store adds a new entry in the cache for a given key and value calculating the
+// expires field accordingly to the default ttl.
+func (c *cache) Store(key, value string) {
+	c.data[key] = cacheItem{entry: value, expires: time.Now().UTC().Add(c.ttl)}
 }
 
-func (c *Cache) SetTTL(n int) {
+// SetTTL updates the default TTL value for the cache.
+func (c *cache) SetTTL(n int) {
 	c.ttl = time.Duration(n) * time.Second
 }
