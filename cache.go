@@ -18,7 +18,7 @@ type cacheItem struct {
 func NewCache() *cache {
 	return &cache{
 		data: map[string]cacheItem{},
-		ttl:  86400 * time.Second,
+		ttl:  ttl,
 	}
 }
 
