@@ -26,7 +26,7 @@ func NewCache() *cache {
 // combinations of values returned.
 // The value and true when the key exists and has not been expired yet.
 // An empty string and false when the key does not exist or has been expired.
-func (c *cache) Get(key string) (string, bool) {
+func (c *cache) Get(key string) (value string, ok bool) {
 	value, ok := c.data[key]
 	if value.expires.Sub(time.Now().UTC()) > 0 {
 		return value.entry, ok
