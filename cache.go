@@ -28,7 +28,7 @@ func NewCache() *cache {
 // An empty string and false when the key does not exist or has been expired.
 func (c *cache) Get(key string) (value string, ok bool) {
 	value, ok := c.data[key]
-	if value.expires.Sub(time.Now().UTC()) > 0 {
+	if value.expires.After(time.Now().UTC()) {
 		return value.entry, ok
 	}
 	delete(c.data, key)
