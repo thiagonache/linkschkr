@@ -15,7 +15,7 @@ type cacheItem struct {
 }
 
 // NewCache instantiates and returns a new cache object
-func NewCache() *cache {
+func NewCache(ttl time.Duration) *cache {
 	return &cache{
 		data: map[string]cacheItem{},
 		ttl:  ttl,
