@@ -26,10 +26,10 @@ func NewCache(ttl time.Duration) *cache {
 // combinations of values returned.
 // The value and true when the key exists and has not been expired yet.
 // An empty string and false when the key does not exist or has been expired.
-func (c *cache) Get(key string) (value string, ok bool) {
-	value, ok := c.data[key]
-	if value.expires.After(time.Now().UTC()) {
-		return value.entry, ok
+func (c *cache) Get(key string) (string, bool) {
+	item, ok := c.data[key]
+	if item.expires.After(time.Now().UTC()) {
+		return item.entry, ok
 	}
 	delete(c.data, key)
 	return "", false
@@ -39,9 +39,4 @@ func (c *cache) Get(key string) (value string, ok bool) {
 // expires field accordingly to the default ttl.
 func (c *cache) Store(key, value string) {
 	c.data[key] = cacheItem{entry: value, expires: time.Now().UTC().Add(c.ttl)}
-}
-
-// SetTTL updates the default TTL value for the cache.
-func (c *cache) SetTTL(n int) {
-	c.ttl = time.Duration(n) * time.Second
 }

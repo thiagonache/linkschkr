@@ -89,7 +89,7 @@ func (ws WebServer) WebServerHandler(w http.ResponseWriter, r *http.Request) {
 
 func NewWebServer() *WebServer {
 	return &WebServer{
-		Cache:   NewCache(),
+		Cache:   NewCache(24 * time.Hour),
 		CheckFn: Check,
 	}
 }
