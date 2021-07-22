@@ -24,7 +24,7 @@ type Config struct {
 }
 
 type WebServer struct {
-	Cache   *Cache
+	Cache   *cache
 	Server  http.Server
 	CheckFn func([]string, ...Option) ([]Result, error)
 }
@@ -89,7 +89,7 @@ func (ws WebServer) WebServerHandler(w http.ResponseWriter, r *http.Request) {
 
 func NewWebServer() *WebServer {
 	return &WebServer{
-		Cache:   NewCache(),
+		Cache:   NewCache(24 * time.Hour),
 		CheckFn: Check,
 	}
 }
